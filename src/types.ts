@@ -25,6 +25,8 @@ export enum OrderStatus {
   REQUESTED = 'REQUESTED',
   CONFIRMED = 'CONFIRMED',
   IN_PROGRESS = 'IN_PROGRESS',
+  SHIPPED = 'SHIPPED',
+  RECEIVED = 'RECEIVED',
   COMPLETED = 'COMPLETED',
   CANCELLED = 'CANCELLED',
 }
@@ -32,6 +34,11 @@ export enum OrderStatus {
 export enum ProductType {
   DIRECT = 'DIRECT', // 直送
   WAREHOUSE = 'WAREHOUSE', // 倉庫納品
+}
+
+export enum ProjectProductDeliveryMethod {
+  WAREHOUSE = 'WAREHOUSE',
+  DIRECT = 'DIRECT',
 }
 
 export enum ProjectStatus {
@@ -44,11 +51,24 @@ export enum ProjectStatus {
 export interface ProjectProduct {
   productId: string;
   proposalComment: string;
+  recommendationReasons?: RecommendationReason[];
   cost: number;
   sellingPrice: number;
   quantity: number;
+  displayOrder?: number;
   isAdopted: boolean;
+  companyProductCode?: string;
+  adoptionDate?: string;
+  orderPlannedDate?: string;
+  deliveryMethod?: ProjectProductDeliveryMethod;
+  allowPublish?: boolean;
+  allowOrder?: boolean;
   orderStatus?: OrderStatus;
+}
+
+export interface RecommendationReason {
+  title: string;
+  detail: string;
 }
 
 export interface OrderRequest {
@@ -70,7 +90,12 @@ export interface Project {
   title: string;
   clientId: string;
   clientName: string;
+  assignedSalesUserId?: string;
+  assignedSalesUserName?: string;
   status: ProjectStatus;
+  proposalBackground?: string;
+  recommendationPoints?: string[];
+  remarks?: string;
   products: ProjectProduct[];
   orderRequests?: OrderRequest[]; // 追加
   totalRevenue: number;
@@ -85,6 +110,23 @@ export interface User {
   email: string;
   role: UserRole;
   supplierId?: string;
+  supplierName?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  deleted?: boolean;
+}
+
+export interface Notification {
+  id: string;
+  title: string;
+  message: string;
+  type: 'ORDER_REQUESTED' | 'ORDER_SHIPPED' | 'ORDER_RECEIVED' | string;
+  projectId?: string;
+  orderId?: string;
+  productId?: string;
+  read: boolean;
+  readAt?: string;
+  createdAt: string;
 }
 
 export interface Supplier {
@@ -107,17 +149,63 @@ export interface Client {
 
 export interface ProductVersion {
   version: number;
+  name?: string;
+  categoryName?: string;
+  janCode?: string;
+  modelNumber?: string;
+  features?: string[];
   cost: number;
   listPrice: number;
+  minLot?: number;
+  leadTime?: string;
   description: string;
   updatedBy?: string;
   createdAt: string;
+}
+
+export interface ProductFieldDiff {
+  field: string;
+  label: string;
+  before: string;
+  after: string;
+}
+
+export interface ProductImageDiff {
+  type: 'ADD' | 'DELETE' | 'REORDER';
+  label: string;
+  imageId?: string;
+  fileId?: string;
+  sortOrder?: number;
+  originalName?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  url?: string;
+  previousOrder?: string[];
+  nextOrder?: string[];
+}
+
+export interface ProductPendingChange {
+  id: string;
+  productId: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  targetVersion: number;
+  requestedById?: string;
+  requestedByName?: string;
+  createdAt: string;
+  changedFields: string[];
+  fieldDiffs: ProductFieldDiff[];
+  imageDiffs: ProductImageDiff[];
+  hasDiff: boolean;
+  legacy?: boolean;
+  currentVersion: number;
 }
 
 export interface Product {
   id: string;
   name: string;
   description: string;
+  modelNumber?: string;
+  features?: string[];
   categoryId: string;
   categoryName: string;
   janCode: string;
@@ -130,10 +218,12 @@ export interface Product {
   supplierName: string;
   status: ProductStatus;
   images: string[];
+  imageAssets?: ProductImageAsset[];
   attachments: string[];
   createdAt: string;
   version: number; // 追加
   versions?: ProductVersion[]; // 追加
+  pendingChange?: ProductPendingChange;
   remarks?: string;
 }
 
@@ -174,4 +264,26 @@ export interface ChangeRequest {
   afterValue: string;
   comment: string;
   createdAt: string;
+}
+
+export interface ProductImageAsset {
+  id: string;
+  productId: string;
+  fileId: string;
+  sortOrder: number;
+  url: string;
+  originalName: string;
+  mimeType: string;
+  sizeBytes: number;
+  warnings?: string[];
+}
+
+export interface GeneratedDocument {
+  id: string;
+  purpose: 'PROJECT_PROPOSAL_PPTX' | 'PROJECT_PL_XLSX';
+  originalName: string;
+  mimeType: string;
+  sizeBytes: number;
+  createdAt: string;
+  downloadUrl: string;
 }

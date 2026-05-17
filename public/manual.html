@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>提案一元管理 操作マニュアル</title>
+    <style>
+      :root {
+        color: #122033;
+        background: #f7fbf8;
+        font-family: "Yu Gothic", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; line-height: 1.7; }
+      header {
+        padding: 48px clamp(24px, 6vw, 80px);
+        background:
+          radial-gradient(circle at 10% 20%, rgba(76, 175, 80, 0.14), transparent 28%),
+          linear-gradient(135deg, #ffffff 0%, #edf8f1 100%);
+        border-bottom: 4px solid #17824a;
+      }
+      .brand { max-width: 980px; margin: 0 auto; }
+      .headline { margin-top: 0; }
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 14px;
+        border-radius: 999px;
+        background: #e6f7ef;
+        color: #047857;
+        font-size: 13px;
+        font-weight: 900;
+      }
+      h1, h2, h3, p { margin: 0; }
+      h1 { margin-top: 16px; font-size: clamp(34px, 5vw, 58px); line-height: 1.12; font-weight: 1000; }
+      header p { margin-top: 18px; color: #43566d; font-size: 17px; font-weight: 700; max-width: 620px; }
+      main { max-width: 1180px; margin: 0 auto; padding: 36px 20px 72px; }
+      section { margin-top: 34px; }
+      .section-title {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        justify-content: center;
+        margin-bottom: 18px;
+        font-size: 24px;
+        font-weight: 1000;
+      }
+      .section-title::before, .section-title::after {
+        content: "";
+        height: 2px;
+        flex: 1;
+        max-width: 180px;
+        background: linear-gradient(90deg, transparent, #94c9aa);
+      }
+      .section-title::after { background: linear-gradient(90deg, #94c9aa, transparent); }
+      .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+      .card {
+        border: 1px solid #dfe9e4;
+        border-radius: 16px;
+        background: #fff;
+        padding: 20px;
+        box-shadow: 0 10px 28px rgba(18, 32, 51, 0.06);
+      }
+      .role-card { text-align: center; }
+      .avatar {
+        width: 74px;
+        height: 74px;
+        margin: 0 auto 10px;
+        border-radius: 50%;
+        background: #e6f7ef;
+        display: grid;
+        place-items: center;
+        color: #16824c;
+      }
+      .avatar svg, .feature svg, .flow-icon svg { width: 34px; height: 34px; stroke-width: 2.4; }
+      h3 { font-size: 16px; font-weight: 1000; }
+      ul { margin: 12px 0 0; padding: 0; list-style: none; text-align: left; }
+      li { position: relative; padding-left: 16px; margin: 7px 0; color: #40536a; font-size: 13px; font-weight: 800; }
+      li::before { content: ""; position: absolute; left: 0; top: 0.72em; width: 6px; height: 6px; border-radius: 50%; background: #63a84f; }
+      .flow { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .flow-card { min-height: 178px; position: relative; }
+      .num {
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        background: #4f963d;
+        color: #fff;
+        display: grid;
+        place-items: center;
+        font-weight: 1000;
+        margin-bottom: 12px;
+      }
+      .flow-icon {
+        height: 58px;
+        display: grid;
+        place-items: center;
+        color: #16824c;
+        background: #eef9f2;
+        border-radius: 14px;
+        margin-bottom: 12px;
+      }
+      .feature-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+      .feature { text-align: center; min-height: 142px; }
+      .feature-icon {
+        width: 56px;
+        height: 56px;
+        margin: 0 auto 10px;
+        border-radius: 18px;
+        display: grid;
+        place-items: center;
+        background: #e6f7ef;
+        color: #16824c;
+      }
+      .notice {
+        margin-top: 34px;
+        border-radius: 22px;
+        background: #e6f7ef;
+        border: 1px solid #bee7cf;
+        padding: 22px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        color: #0f6b3e;
+        font-weight: 1000;
+      }
+      .notice .check {
+        width: 46px;
+        height: 46px;
+        border-radius: 50%;
+        background: #4f963d;
+        color: #fff;
+        display: grid;
+        place-items: center;
+        flex: 0 0 auto;
+      }
+      @media (max-width: 900px) {
+        header { grid-template-columns: 1fr; }
+        .grid, .flow, .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
+      @media (max-width: 560px) {
+        .grid, .flow, .feature-grid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <div class="headline">
+          <span class="eyebrow">操作マニュアル</span>
+          <h1>提案・採用・発注管理システム</h1>
+          <p>提案から採用、発注、納品、実績出力までをひとつの画面で追跡できる業務マニュアルです。</p>
+        </div>
+      </div>
+    </header>
+    <main>
+      <section>
+        <h2 class="section-title">利用する人（ロール）</h2>
+        <div class="grid">
+          <article class="card role-card">
+            <div class="avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></div>
+            <h3>管理者</h3>
+            <ul><li>全データの管理</li><li>商品修正の承認・却下</li><li>ユーザーと権限の管理</li></ul>
+          </article>
+          <article class="card role-card">
+            <div class="avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16"/><path d="M7 7V5h10v2"/><rect x="5" y="7" width="14" height="13" rx="2"/><path d="M9 12h6M9 16h4"/></svg></div>
+            <h3>商品担当</h3>
+            <ul><li>案件作成・商品選定</li><li>提案書と損益計算書の出力</li><li>発注と納品状況の確認</li></ul>
+          </article>
+          <article class="card role-card">
+            <div class="avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 12h6l3-8 3 16 3-8h3"/></svg></div>
+            <h3>営業担当</h3>
+            <ul><li>割当案件の確認</li><li>提案内容の閲覧</li><li>商品カタログの閲覧</li></ul>
+          </article>
+          <article class="card role-card">
+            <div class="avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-8h6v8"/></svg></div>
+            <h3>サプライヤー</h3>
+            <ul><li>自社商品の登録・修正</li><li>発注依頼の確認</li><li>発送済みの報告</li></ul>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="section-title">業務フロー（全体の流れ）</h2>
+        <div class="grid flow">
+          <article class="card flow-card"><div class="num">1</div><div class="flow-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 2h6l1 3h3v17H5V5h3l1-3Z"/><path d="M9 12h6M9 16h4"/></svg></div><h3>案件作成</h3><p>案件名、クライアント、背景を登録します。</p></article>
+          <article class="card flow-card"><div class="num">2</div><div class="flow-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/><path d="M8 11h6"/></svg></div><h3>商品選定</h3><p>カタログから候補商品を選択します。</p></article>
+          <article class="card flow-card"><div class="num">3</div><div class="flow-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 16v-5M12 16V8M16 16v-8"/></svg></div><h3>損益確認</h3><p>提案価格、数量、配送方法を確認します。</p></article>
+          <article class="card flow-card"><div class="num">4</div><div class="flow-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 4h16v12H5.5L4 18V4Z"/><path d="m8 10 2.5 2.5L16 7"/></svg></div><h3>クライアント提案</h3><p>提案書を出力し、営業担当へ共有します。</p></article>
+          <article class="card flow-card"><div class="num">5</div><div class="flow-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 6 9 17l-5-5"/></svg></div><h3>採用判断</h3><p>成約後、採用商品を発注へ切り替えます。</p></article>
+          <article class="card flow-card"><div class="num">6</div><div class="flow-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="9" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/><path d="M3 4h2l2 11h11l2-7H7"/></svg></div><h3>受注・発注</h3><p>サプライヤーへ発注依頼が通知されます。</p></article>
+          <article class="card flow-card"><div class="num">7</div><div class="flow-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 7h11v10H3z"/><path d="M14 10h4l3 3v4h-7z"/><circle cx="7" cy="19" r="1.5"/><circle cx="18" cy="19" r="1.5"/></svg></div><h3>発送・受取</h3><p>発送済み、受取済みをステータスで共有します。</p></article>
+          <article class="card flow-card"><div class="num">8</div><div class="flow-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 19h16"/><path d="M6 17V9M12 17V5M18 17v-6"/></svg></div><h3>実績出力</h3><p>CSV、提案書、損益計算書を出力します。</p></article>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="section-title">主な機能</h2>
+        <div class="grid feature-grid">
+          <article class="card feature"><div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 21l-4-4"/><circle cx="11" cy="11" r="7"/></svg></div><h3>商品管理</h3></article>
+          <article class="card feature"><div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/></svg></div><h3>提案書出力</h3></article>
+          <article class="card feature"><div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h4"/></svg></div><h3>損益計算</h3></article>
+          <article class="card feature"><div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg></div><h3>通知</h3></article>
+          <article class="card feature"><div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></div><h3>データ出力</h3></article>
+          <article class="card feature"><div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5z"/><path d="M9 12l2 2 4-4"/></svg></div><h3>権限管理</h3></article>
+        </div>
+      </section>
+
+      <div class="notice">
+        <div class="check"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="3"><path d="m5 12 4 4L19 6"/></svg></div>
+        <div>シンプルな操作で、提案から納品、実績管理までを効率よく進められます。</div>
+      </div>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,461 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  SUPPLIER
+  PRODUCT_MANAGER
+  SALES
+  ADMIN
+}
+
+enum ProductStatus {
+  DRAFT
+  SUBMITTED
+  PENDING_APPROVAL
+  ACTIVE
+  ADOPTED
+  INACTIVE
+  CANCELLED
+}
+
+enum ProductType {
+  DIRECT
+  WAREHOUSE
+}
+
+enum ProjectProductDeliveryMethod {
+  WAREHOUSE
+  DIRECT
+}
+
+enum ProjectStatus {
+  DRAFT
+  PROPOSED
+  ADOPTED
+  REJECTED
+}
+
+enum OrderStatus {
+  REQUESTED
+  CONFIRMED
+  IN_PROGRESS
+  SHIPPED
+  RECEIVED
+  COMPLETED
+  CANCELLED
+}
+
+enum OrderType {
+  NEW
+  ADDITIONAL
+}
+
+enum ChangeRequestType {
+  COST_CHANGE
+  CANCEL_PROPOSAL
+}
+
+enum ChangeRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum FileOwnerType {
+  PRODUCT
+  PROJECT
+  PROPOSAL
+  USER
+}
+
+enum FileStatus {
+  PENDING
+  READY
+  DELETED
+}
+
+enum ProposalStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+}
+
+model User {
+  id           String     @id @default(uuid())
+  name         String
+  email        String     @unique
+  passwordHash String
+  role         UserRole
+  supplierId   String?
+  supplier     Supplier?  @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  uploadedFiles File[]    @relation("UploadedFiles")
+  assignedProjects Project[] @relation("AssignedSalesProjects")
+  notifications Notification[]
+  auditLogs    AuditLog[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  deletedAt    DateTime?
+
+  @@index([role])
+  @@index([supplierId])
+  @@index([createdAt])
+}
+
+model Supplier {
+  id          String       @id @default(uuid())
+  name        String
+  contactName String
+  email       String
+  address     String?
+  phone       String?
+  users       User[]
+  products    Product[]
+  orders      OrderRequest[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  deletedAt   DateTime?
+
+  @@index([createdAt])
+  @@index([deletedAt])
+}
+
+model Client {
+  id          String     @id @default(uuid())
+  name        String
+  contactName String
+  email       String
+  address     String?
+  phone       String?
+  projects    Project[]
+  proposals   Proposal[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  deletedAt   DateTime?
+
+  @@index([createdAt])
+  @@index([deletedAt])
+}
+
+model Category {
+  id        String    @id @default(uuid())
+  name      String    @unique
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Product {
+  id          String              @id @default(uuid())
+  name        String
+  description String
+  modelNumber String?
+  features    Json?
+  categoryId  String
+  category    Category            @relation(fields: [categoryId], references: [id])
+  janCode     String              @unique
+  productType ProductType
+  cost        Decimal             @db.Decimal(12, 2)
+  listPrice   Decimal             @db.Decimal(12, 2)
+  minLot      Int
+  leadTime    String
+  supplierId  String
+  supplier    Supplier            @relation(fields: [supplierId], references: [id])
+  status      ProductStatus       @default(DRAFT)
+  imageUrl    String?
+  version     Int                 @default(1)
+  remarks     String?
+  versions    ProductVersion[]
+  images      ProductImage[]
+  attachments ProductAttachment[]
+  projectItems ProjectProduct[]
+  proposalItems ProposalItem[]
+  orderRequests OrderRequest[]
+  changeRequests ChangeRequest[]
+  productChangeRequests ProductChangeRequest[]
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  deletedAt   DateTime?
+
+  @@index([status])
+  @@index([supplierId])
+  @@index([categoryId])
+  @@index([createdAt])
+  @@index([deletedAt])
+}
+
+model ProductVersion {
+  id          String   @id @default(uuid())
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  version     Int
+  name        String?
+  categoryName String?
+  janCode     String?
+  modelNumber String?
+  features    Json?
+  cost        Decimal  @db.Decimal(12, 2)
+  listPrice   Decimal  @db.Decimal(12, 2)
+  minLot      Int?
+  leadTime    String?
+  description String
+  updatedBy   String?
+  createdAt   DateTime @default(now())
+
+  @@unique([productId, version])
+  @@index([createdAt])
+}
+
+model File {
+  id           String        @id @default(uuid())
+  bucket       String
+  objectKey    String        @unique
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+  checksum     String?
+  status       FileStatus    @default(PENDING)
+  ownerType    FileOwnerType?
+  ownerId      String?
+  purpose      String?
+  uploadedById String?
+  uploadedBy   User?         @relation("UploadedFiles", fields: [uploadedById], references: [id], onDelete: SetNull)
+  productImages ProductImage[]
+  productAttachments ProductAttachment[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  deletedAt    DateTime?
+
+  @@index([status])
+  @@index([ownerType, ownerId])
+  @@index([ownerType, ownerId, purpose])
+  @@index([uploadedById])
+  @@index([createdAt])
+}
+
+model ProductImage {
+  id        String   @id @default(uuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  fileId    String
+  file      File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@unique([productId, fileId])
+  @@index([productId])
+}
+
+model ProductAttachment {
+  id        String   @id @default(uuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  fileId    String
+  file      File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([productId, fileId])
+  @@index([productId])
+}
+
+model ProductChangeRequest {
+  id             String              @id @default(uuid())
+  productId      String
+  product        Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  status         ChangeRequestStatus @default(PENDING)
+  requestedById  String?
+  requestedByName String?
+  targetVersion  Int
+  beforeSnapshot Json
+  afterSnapshot  Json
+  changedFields  Json
+  imageChanges   Json?
+  approvedAt     DateTime?
+  rejectedAt     DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([productId, status])
+  @@index([createdAt])
+}
+
+model Project {
+  id           String           @id @default(uuid())
+  title        String
+  proposalBackground String?
+  recommendationPoints Json?
+  remarks      String?
+  clientId     String
+  client       Client           @relation(fields: [clientId], references: [id])
+  assignedSalesUserId String?
+  assignedSalesUser   User?     @relation("AssignedSalesProjects", fields: [assignedSalesUserId], references: [id], onDelete: SetNull)
+  status       ProjectStatus    @default(DRAFT)
+  products     ProjectProduct[]
+  orderRequests OrderRequest[]
+  profitAndLoss ProfitAndLoss[]
+  totalRevenue Decimal          @db.Decimal(12, 2)
+  totalProfit  Decimal          @db.Decimal(12, 2)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  deletedAt    DateTime?
+
+  @@index([status])
+  @@index([clientId])
+  @@index([assignedSalesUserId])
+  @@index([createdAt])
+}
+
+model ProjectProduct {
+  id              String      @id @default(uuid())
+  projectId       String
+  project         Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product     @relation(fields: [productId], references: [id])
+  proposalComment String
+  recommendationReasons Json?
+  cost            Decimal     @db.Decimal(12, 2)
+  sellingPrice    Decimal     @db.Decimal(12, 2)
+  quantity        Int
+  displayOrder    Int         @default(0)
+  isAdopted       Boolean     @default(false)
+  companyProductCode String?
+  adoptionDate    DateTime?
+  orderPlannedDate DateTime?
+  deliveryMethod  ProjectProductDeliveryMethod @default(WAREHOUSE)
+  allowPublish    Boolean     @default(false)
+  allowOrder      Boolean     @default(false)
+  orderStatus     OrderStatus?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@unique([projectId, productId])
+  @@index([projectId])
+  @@index([productId])
+}
+
+model Proposal {
+  id        String         @id @default(uuid())
+  title     String
+  clientId  String
+  client    Client         @relation(fields: [clientId], references: [id])
+  status    ProposalStatus @default(DRAFT)
+  items     ProposalItem[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@index([status])
+  @@index([clientId])
+  @@index([createdAt])
+}
+
+model ProposalItem {
+  id         String   @id @default(uuid())
+  proposalId String
+  proposal   Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+  comment    String
+  createdAt  DateTime @default(now())
+
+  @@unique([proposalId, productId])
+  @@index([productId])
+}
+
+model OrderRequest {
+  id               String      @id @default(uuid())
+  projectId        String
+  project          Project     @relation(fields: [projectId], references: [id])
+  productId        String
+  product          Product     @relation(fields: [productId], references: [id])
+  productName      String
+  supplierId       String
+  supplier         Supplier    @relation(fields: [supplierId], references: [id])
+  quantity         Int
+  deliveryDate     DateTime
+  deliveryLocation String
+  status           OrderStatus @default(REQUESTED)
+  orderType        OrderType
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@index([status])
+  @@index([projectId])
+  @@index([supplierId])
+  @@index([createdAt])
+}
+
+model ChangeRequest {
+  id            String              @id @default(uuid())
+  type          ChangeRequestType
+  productId     String
+  product       Product             @relation(fields: [productId], references: [id])
+  applicantId   String
+  applicantName String
+  status        ChangeRequestStatus @default(PENDING)
+  beforeValue   String
+  afterValue    String
+  comment       String
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@index([status])
+  @@index([productId])
+  @@index([createdAt])
+}
+
+model ProfitAndLoss {
+  id                String   @id @default(uuid())
+  projectId         String
+  project           Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  cost              Decimal  @db.Decimal(12, 2)
+  sellingPrice      Decimal  @db.Decimal(12, 2)
+  quantity          Int
+  shippingFee       Decimal  @db.Decimal(12, 2) @default(0)
+  processingFee     Decimal  @db.Decimal(12, 2) @default(0)
+  otherFee          Decimal  @db.Decimal(12, 2) @default(0)
+  revenue           Decimal  @db.Decimal(12, 2)
+  grossProfit       Decimal  @db.Decimal(12, 2)
+  grossProfitMargin Decimal  @db.Decimal(5, 2)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([projectId])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action     String
+  entityType String
+  entityId   String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  type      String
+  projectId String?
+  orderId   String?
+  productId String?
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, readAt])
+  @@index([projectId])
+  @@index([createdAt])
+}
