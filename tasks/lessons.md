@@ -1,5 +1,13 @@
 # Lessons
 
+## 2026-05-20 Local Frontend Must Use Vite Proxy Instead Of Static Dist
+
+- Symptom: Local login failed with `Network request failed`, browser console showed CSP blocks against `http://localhost:4000/api/auth/login`, and the manual link on `localhost:3000` could bounce back to the homepage.
+- Root Cause: Port `3000` was being served by `serve -s dist` instead of Vite dev, while the frontend env still pointed `VITE_API_BASE_URL` at an absolute backend origin. The static server redirected `/manual.html` to `/manual`, and the absolute API origin violated same-origin CSP in the local browser context.
+- Fix: Resolve frontend API calls to same-origin `/api` on localhost, add a Vite dev proxy from `/api` to `http://localhost:4000`, keep the manual link on `/manual.html`, and run local frontend through `npm run dev` instead of a static dist server.
+- Prevention Rule: For local web development, run the frontend through the repo's dev server with same-origin API proxying; do not point browser code at absolute localhost backend URLs or replace the dev server with a static dist host on the same port.
+- Example: `http://localhost:3000/api/auth/login` now proxies to the backend and returns `200`, while `http://localhost:3000/manual.html` opens directly without redirecting to a missing React route.
+
 ## 2026-05-17 Product API 400 Error Clarity
 
 - Symptom: Product registration or image upload could surface only `Request failed with status 400` in the UI.

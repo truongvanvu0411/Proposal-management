@@ -1,6 +1,13 @@
 import type { Client, GeneratedDocument, Notification, OrderRequest, OrderStatus, Product, Project, Supplier, User } from '../types';
+import { resolveApiBaseUrl } from '../lib/runtimePaths';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000/api';
+type RequestBody = string | FormData | Blob | URLSearchParams | ArrayBuffer | ArrayBufferView | null | undefined;
+
+const API_BASE_URL = resolveApiBaseUrl(
+  typeof window !== 'undefined' ? window.location : undefined,
+  import.meta.env.VITE_API_BASE_URL,
+);
+const APP_BUILD_HEADER = '2026-05-20-cache-bust-1';
 const ACCESS_TOKEN_KEY = 'proposal_management_access_token';
 const REFRESH_TOKEN_KEY = 'proposal_management_refresh_token';
 
@@ -238,15 +245,15 @@ async function request<T>(
 ): Promise<T> {
   const headers = new Headers();
   headers.set('Content-Type', 'application/json');
+  headers.set('X-App-Build', APP_BUILD_HEADER);
 
   if (!options.skipAuth && accessToken) {
     headers.set('Authorization', `Bearer ${accessToken}`);
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await sendRequestWithFallback(`${API_BASE_URL}${path}`, {
     method: options.method ?? 'GET',
     headers,
-    credentials: 'include',
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
 
@@ -264,14 +271,14 @@ async function request<T>(
 
 async function downloadFile(path: string) {
   const headers = new Headers();
+  headers.set('X-App-Build', APP_BUILD_HEADER);
   if (accessToken) {
     headers.set('Authorization', `Bearer ${accessToken}`);
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await sendRequestWithFallback(`${API_BASE_URL}${path}`, {
     method: 'GET',
     headers,
-    credentials: 'include',
   });
 
   if (!response.ok) {
@@ -291,14 +298,14 @@ async function uploadFiles<T>(path: string, fieldName: string, files: File[]): P
   const body = new FormData();
   files.forEach((file) => body.append(fieldName, file));
   const headers = new Headers();
+  headers.set('X-App-Build', APP_BUILD_HEADER);
   if (accessToken) {
     headers.set('Authorization', `Bearer ${accessToken}`);
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await sendRequestWithFallback(`${API_BASE_URL}${path}`, {
     method: 'POST',
     headers,
-    credentials: 'include',
     body,
   });
 
@@ -392,4 +399,75 @@ function getValidationDetail(details: unknown) {
 function getFilenameFromDisposition(disposition: string | null) {
   const match = disposition?.match(/filename="([^"]+)"/);
   return match?.[1];
+}
+
+async function sendRequestWithFallback(
+  url: string,
+  options: {
+    method: string;
+    headers: Headers;
+    body?: RequestBody;
+  },
+) {
+  try {
+    return await fetch(url, {
+      method: options.method,
+      headers: options.headers,
+      credentials: 'include',
+      body: options.body,
+    });
+  } catch (error) {
+    if (!(error instanceof TypeError)) {
+      throw error;
+    }
+    return sendXmlHttpRequest(url, options);
+  }
+}
+
+function sendXmlHttpRequest(
+  url: string,
+  options: {
+    method: string;
+    headers: Headers;
+    body?: RequestBody;
+  },
+) {
+  return new Promise<Response>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(options.method, url, true);
+    xhr.withCredentials = true;
+    options.headers.forEach((value, key) => {
+      xhr.setRequestHeader(key, value);
+    });
+    xhr.onload = () => {
+      resolve(
+        new Response(xhr.responseText, {
+          status: xhr.status,
+          statusText: xhr.statusText,
+          headers: parseXhrHeaders(xhr.getAllResponseHeaders()),
+        }),
+      );
+    };
+    xhr.onerror = () => reject(new TypeError('Network request failed'));
+    xhr.ontimeout = () => reject(new TypeError('Network request timed out'));
+    xhr.send(options.body ?? null);
+  });
+}
+
+function parseXhrHeaders(rawHeaders: string) {
+  const headers = new Headers();
+  rawHeaders
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .forEach((line) => {
+      const separatorIndex = line.indexOf(':');
+      if (separatorIndex === -1) {
+        return;
+      }
+      const key = line.slice(0, separatorIndex).trim();
+      const value = line.slice(separatorIndex + 1).trim();
+      headers.append(key, value);
+    });
+  return headers;
 }

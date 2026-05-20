@@ -82,6 +82,7 @@ import {
   GeneratedDocument, Notification, Project, ProjectStatus, Product, ProjectProduct, ProjectProductDeliveryMethod, ProductStatus, ProductType, ProductVersion, Supplier, Client, OrderRequest, OrderStatus, User, UserRole
 } from './types';
 import { api, clearSession, getStoredAccessToken, getStoredRefreshToken } from './api/client';
+import { resolveManualUrl } from './lib/runtimePaths';
 
 // --- Components ---
 
@@ -4737,7 +4738,7 @@ const MainLayout = ({
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={() => window.open('/manual.html', '_blank', 'noopener,noreferrer')}
+                onClick={() => window.open(resolveManualUrl(), '_blank', 'noopener,noreferrer')}
                 className="p-2 text-slate-400 hover:text-primary transition-colors"
                 aria-label="操作マニュアルを開く"
               >
@@ -5435,6 +5436,8 @@ export default function App() {
   return (
     <Router>
       <Routes>
+        <Route path="/manual" element={<Navigate to={resolveManualUrl()} replace />} />
+        <Route path="/manual/*" element={<Navigate to={resolveManualUrl()} replace />} />
         <Route path="/login" element={currentUser ? <Navigate to="/" replace /> : <LoginPage onLogin={handleLogin} />} />
         <Route path="/*" element={
           isBootstrapping ? loadingScreen : !currentUser ? <Navigate to="/login" replace /> : (

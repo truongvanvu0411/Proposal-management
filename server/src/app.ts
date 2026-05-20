@@ -3,6 +3,8 @@ import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { AppDependencies } from './types';
 import { getConfig } from './config/env';
 import { getPrisma } from './db/prisma';
@@ -22,6 +24,8 @@ export function createApp(dependencies: AppDependencies = {}) {
   const config = dependencies.config ?? getConfig();
   const db = dependencies.db ?? getPrisma();
   const storage = dependencies.storage ?? createS3Storage(config);
+  const frontendDistDir = process.env.FRONTEND_DIST_DIR;
+  const frontendIndexPath = frontendDistDir ? path.join(frontendDistDir, 'index.html') : null;
   const app = express();
 
   app.use(helmet());
@@ -53,6 +57,16 @@ export function createApp(dependencies: AppDependencies = {}) {
   app.use('/api/notifications', createNotificationsRouter(db, config));
   app.use('/api/files', createFilesRouter(db, storage, config));
   app.use('/api/exports', createExportsRouter(db, config));
+
+  if (frontendDistDir && frontendIndexPath && fs.existsSync(frontendIndexPath)) {
+    app.use(express.static(frontendDistDir));
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api')) {
+        return next();
+      }
+      return res.sendFile(frontendIndexPath);
+    });
+  }
 
   app.use(notFoundHandler);
   app.use(errorHandler);
