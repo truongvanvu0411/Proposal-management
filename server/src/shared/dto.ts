@@ -82,6 +82,8 @@ export function toProductDto(
     supplierId: product.supplierId,
     supplierName: product.supplier?.name ?? '',
     status: product.status,
+    availableFrom: product.availableFrom ? toDateOnly(product.availableFrom) : undefined,
+    availableTo: product.availableTo ? toDateOnly(product.availableTo) : undefined,
     images: imageUrls?.length ? imageUrls : product.imageUrl ? [product.imageUrl] : [],
     imageAssets: imageAssets ?? [],
     attachments: product.attachments?.map((attachment) => attachment.file?.originalName ?? '') ?? [],

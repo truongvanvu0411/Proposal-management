@@ -239,3 +239,99 @@
 - Fix: Convert the funnel to compact progress rows, make action items a fixed five-row list, and replace the supplier vertical chart with a CSS progress ranking list.
 - Prevention Rule: Small cockpit panels should use predictable list/progress layouts instead of nested chart components or fixed-height cards unless their rendered height has been browser-verified.
 - Example: Supplier ranking now shows each supplier name, revenue, and a green progress bar without Recharts tooltip overlays or axis label overflow.
+
+## 2026-05-20 Adoption, Availability, And Export Filters Must Share One Workflow
+
+- Symptom: Adopted products, product expiry, dashboard adoption metrics, and export filters were requested together, but the existing code treated adoption as a loose project-product flag and exports as static CSV cards.
+- Root Cause: The app had data fields for project-product adoption but no dedicated notification/filter/export surface, and product master records had no proposal availability window.
+- Fix: Add product availability dates, block newly selected expired products from proposal creation, add explicit adoption tagging with product code and notifications, replace the dashboard trend with adoption analysis, and convert exports into tabbed filtered CSV/ZIP flows.
+- Prevention Rule: Workflow flags that become reporting dimensions need API, UI filters, notifications, and export datasets updated together; otherwise the user sees inconsistent states across screens.
+- Example: A 成約 project product can now be marked 採用 with 商品コード, related users get `PRODUCT_ADOPTED`, catalog can filter 採用済み and期限, and データ出力 can export 採用商品 plus optional image ZIP.
+
+## 2026-05-21 Initial Product Images And Export ZIPs Need The Official Asset Path
+
+- Symptom: New product creation showed an empty thumbnail until later refresh/approval, export ZIPs missed original product images, and export date pickers were clipped inside the card.
+- Root Cause: The image upload endpoint treated first-time product images as pending approval changes, export ZIP generation only copied storage-backed image records and skipped fallback `imageUrl` assets, and the export tab card clipped child popovers.
+- Fix: Allow explicit initial image uploads to create official `ProductImage` records immediately, include both storage objects and local/remote `imageUrl` fallbacks in export ZIP image folders, and let the export panel overflow visible for the themed calendar.
+- Prevention Rule: Creation flows should separate official initial assets from later approval-stage edits, and every export path must use the same image source fallback chain as catalog/detail UI.
+- Example: Creating a supplier product with `?initial=true` keeps it `ACTIVE` with visible thumbnails, while product CSV ZIP export includes `images/*.jpg` files even for seeded `/assets/...` catalog images.
+
+## 2026-05-21 Brand Marks Should Be Vector Components
+
+- Symptom: The sidebar and login logo looked blurry or awkward because the app reused raster logo files with extra whitespace at very different sizes.
+- Root Cause: PNG assets were being stretched into sidebar, collapsed navigation, login, and favicon contexts even though each surface needs a crisp mark with predictable spacing.
+- Fix: Replace in-app raster logo usage with reusable SVG/lucide-based `BrandMark` and `BrandLogo` components, and point the favicon to a matching SVG mark.
+- Prevention Rule: Core product identity shown across responsive UI shells should be a vector component or SVG asset, not a large whitespace-heavy raster image.
+- Example: Sidebar expanded shows a compact green mark plus wordmark, collapsed shows only the SVG mark, login uses a larger wordmark, and `/favicon.svg` uses the same visual language.
+
+## 2026-05-21 Role Permissions Need Scope Checks, Not Just Route Access
+
+- Symptom: Sales users needed to generate/download PPTX and Excel, but simply adding `SALES` to the document route role list would expose documents for projects assigned to other people.
+- Root Cause: Document generation routes previously relied on broad role gating and did not validate project ownership for sales users.
+- Fix: Allow sales users through the document route only after checking `assignedSalesUserId`, add account self password change and demo forgot-password endpoints, and verify the behavior with regression tests.
+- Prevention Rule: Any new permission must define both the capability and the record scope; role checks alone are not enough for user-specific workflows.
+- Example: A sales user can list/generate documents for an assigned project, but receives `PROJECT_DOCUMENT_FORBIDDEN` for an unassigned project.
+
+## 2026-05-21 Adoption UI Should Separate Tagging From Ordering
+
+- Symptom: Product code entry and adoption controls were too loose: 商品コード could be edited before a product was actually adopted, and bulk adoption/unadoption was missing from project detail.
+- Root Cause: The UI enabled controls based mainly on project status and did not distinguish `isAdopted` tagging from `allowOrder` order conversion clearly enough.
+- Fix: Enable 商品コード only when the project is 成約 and the product is 採用済み, add 全部採用/全部不採用 actions, show supplier names in project product rows, and keep 発注に切り替える as a separate order handoff.
+- Prevention Rule: Workflow flags that drive reporting, product code, and supplier visibility must have explicit UI states and bulk controls that do not silently trigger downstream order flow.
+- Example: A 成約 project can mark all proposal products 採用, then each adopted product's 商品コード field becomes editable with the placeholder `商品コード`; 発注 remains a separate button.
+
+## 2026-05-21 Project Detail Edits Need An Explicit Save Step
+
+- Symptom: Changing status, sales assignment, adoption tags, product codes, or order conversion inside project detail saved immediately, making users unsure which actions were already persisted.
+- Root Cause: Detail controls called the same API update handler used by wizard save, so every small UI change became an immediate backend mutation.
+- Fix: Add a staged project detail update path that updates the local drawer state, displays `未登録の変更あり`, and only persists when the user clicks `登録`.
+- Prevention Rule: Dense manager/detail screens should use explicit save behavior for multi-field workflows; reserve immediate API calls for clearly transactional actions such as order status updates.
+- Example: Marking a 成約 product as 不採用 changes the row badge immediately in the drawer, but the backend is updated only after `登録`.
+
+## 2026-05-21 Product Images Must Not Expose Local Storage Hosts
+
+- Symptom: Catalog thumbnails worked on the developer machine but disappeared on another machine when products used uploaded images.
+- Root Cause: Product DTOs returned MinIO presigned URLs using `http://localhost:9000`, so remote browsers tried to load their own localhost instead of the app server.
+- Fix: Return app-relative file content URLs for product images and stream image bytes through `/api/files/:id/content`.
+- Prevention Rule: UI-facing asset URLs must be reachable from the browser's network context; never expose local-only storage endpoints in API responses.
+- Example: Uploaded product images now use `/api/files/<fileId>/content`, which works through `https://cjp-demo.online` and local dev alike.
+
+## 2026-05-21 Dashboard Cockpits Need Laptop-First Density Checks
+
+- Symptom: The dashboard looked cramped at normal laptop size with 100% display scaling; small charts and action lists were clipped inside fixed panels.
+- Root Cause: The cockpit used the same padding, five KPI cards, a donut-heavy action panel, and rigid grid heights for wide desktop and laptop viewports.
+- Fix: Compact header/filter/KPI spacing, convert the action donut into a small bar-summary panel, and tighten dashboard panel radii/gaps so all widgets fit at 1366x768.
+- Prevention Rule: Fullscreen dashboard layouts must be visually checked at 1366x768 and keep scroll width/height within the viewport before being marked done.
+- Example: The 1366x768 dashboard now keeps all primary panels visible, with `要対応` rows fitting inside the card instead of being cut off.
+
+## 2026-05-21 Public Demo Needs Database And Token Failure Checks
+
+- Symptom: The public domain loaded the frontend but another machine saw `Unexpected server error` during login/session restore.
+- Root Cause: The Docker Postgres/MinIO services were not running, and invalid refresh tokens could bubble out as a generic 500.
+- Fix: Start the compose services before exposing the tunnel, restart the backend after DB startup, and wrap JWT verification failures as `401 INVALID_TOKEN`.
+- Prevention Rule: Public demo startup checks must verify frontend, API health, DB-backed login, and invalid-token behavior rather than only checking `/api/health`.
+- Example: `https://cjp-demo.online/api/auth/login` now succeeds with the admin account, while a bad refresh token returns 401 so the frontend can clear stale session state.
+
+## 2026-05-21 EC2 Demo Deploys Need A Repeatable Compose Kit
+
+- Symptom: Moving from a local Cloudflare tunnel demo to AWS would otherwise require many fragile manual steps for Node, Postgres, MinIO, HTTPS, migrations, and seed data.
+- Root Cause: The repo only documented local development and had no production compose, reverse proxy, bootstrap, deploy, or backup scripts.
+- Fix: Add a single-EC2 Docker Compose kit with Caddy HTTPS, app container, Postgres, MinIO, deploy/bootstrap/backup scripts, and an AWS runbook.
+- Prevention Rule: Demo infrastructure should be reproducible from repo files and validate with `docker compose config`, `docker build`, and app health checks before handoff.
+- Example: A new Ubuntu EC2 can clone the repo, fill `.env.prod`, run `sh scripts/deploy-prod.sh`, and serve the app at `https://APP_DOMAIN`.
+
+## 2026-05-21 AWS Console Steps Should Have CLI Automation
+
+- Symptom: Creating demo AWS resources manually in the console is easy to misconfigure, especially security groups, key pairs, AMIs, Elastic IPs, and volume sizing.
+- Root Cause: The deployment kit automated app runtime but still left cloud resource provisioning as a manual checklist.
+- Fix: Add a PowerShell AWS CLI provisioning script that creates/imports the SSH key, security group, Ubuntu EC2 instance, and Elastic IP idempotently.
+- Prevention Rule: Any cloud deployment runbook should separate account/DNS actions from scriptable infrastructure and provide an idempotent command-line path for repeatable setup.
+- Example: `scripts/aws-provision-ec2.ps1` provisions the single-instance demo baseline and prints the SSH command plus Elastic IP for DNS.
+
+## 2026-05-22 Detail Popovers And Generated Sheets Need Interaction Regression Checks
+
+- Symptom: Notification and account menus could remain open together, dashboard date pickers were covered by charts, order-stage product rows still offered 不採用, and exported P/L sheets only contained static numbers.
+- Root Cause: Header popovers were independent booleans without outside-click coordination, chart/card z-indexes were not checked against calendar overlays, order/adoption controls were reused across tabs, and the P/L generator wrote cached totals instead of Excel formulas.
+- Fix: Make top-right menus mutually exclusive with outside-click close, raise themed date picker overlays above charts, remove 不採用 from 発注管理 rows, add hover detail to the funnel overview, and write formulas plus workbook recalculation flags into P/L xlsx output.
+- Prevention Rule: Stateful detail screens and exports need regression checks for UI interaction layering and post-export editability, not just API success.
+- Example: A generated P/L file now keeps cached values for preview but stores `F9=D9*E9`, `F21=SUM(F9:F20)`, and summary cells linked to totals so Excel recalculates after user edits.

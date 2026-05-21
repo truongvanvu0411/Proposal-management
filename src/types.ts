@@ -217,6 +217,8 @@ export interface Product {
   supplierId: string;
   supplierName: string;
   status: ProductStatus;
+  availableFrom?: string;
+  availableTo?: string;
   images: string[];
   imageAssets?: ProductImageAsset[];
   attachments: string[];

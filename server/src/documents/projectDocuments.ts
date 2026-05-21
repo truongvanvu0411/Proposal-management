@@ -166,10 +166,10 @@ export async function generateProfitAndLossXlsx(project: ProjectDocument) {
   sheetXml = setXlsxCell(sheetXml, 'G5', '納品予定日');
   sheetXml = setXlsxCell(sheetXml, 'H5', deliveryDate ? toDateOnly(deliveryDate) : '');
   sheetXml = setXlsxCell(sheetXml, 'L5', `Generated ${toDateOnly(new Date())}`);
-  sheetXml = setXlsxCell(sheetXml, 'N4', totalRevenue);
-  sheetXml = setXlsxCell(sheetXml, 'N5', totalCost);
-  sheetXml = setXlsxCell(sheetXml, 'N6', totalProfit);
-  sheetXml = setXlsxCell(sheetXml, 'N7', grossMargin);
+  sheetXml = setXlsxFormula(sheetXml, 'N4', 'F21', totalRevenue);
+  sheetXml = setXlsxFormula(sheetXml, 'N5', 'H21', totalCost);
+  sheetXml = setXlsxFormula(sheetXml, 'N6', 'I21', totalProfit);
+  sheetXml = setXlsxFormula(sheetXml, 'N7', 'J21', grossMargin);
 
   for (let row = 9; row <= 20; row += 1) {
     sheetXml = setXlsxCell(sheetXml, `B${row}`, '');
@@ -193,11 +193,11 @@ export async function generateProfitAndLossXlsx(project: ProjectDocument) {
     sheetXml = setXlsxCell(sheetXml, `C${row}`, getDeliveryMethodLabel(projectProduct.deliveryMethod ?? projectProduct.product?.productType));
     sheetXml = setXlsxCell(sheetXml, `D${row}`, projectProduct.quantity);
     sheetXml = setXlsxCell(sheetXml, `E${row}`, toNumber(projectProduct.sellingPrice));
-    sheetXml = setXlsxCell(sheetXml, `F${row}`, revenue);
+    sheetXml = setXlsxFormula(sheetXml, `F${row}`, `D${row}*E${row}`, revenue);
     sheetXml = setXlsxCell(sheetXml, `G${row}`, toNumber(projectProduct.cost));
-    sheetXml = setXlsxCell(sheetXml, `H${row}`, costTotal);
-    sheetXml = setXlsxCell(sheetXml, `I${row}`, profit);
-    sheetXml = setXlsxCell(sheetXml, `J${row}`, revenue > 0 ? profit / revenue : 0);
+    sheetXml = setXlsxFormula(sheetXml, `H${row}`, `D${row}*G${row}`, costTotal);
+    sheetXml = setXlsxFormula(sheetXml, `I${row}`, `F${row}-H${row}`, profit);
+    sheetXml = setXlsxFormula(sheetXml, `J${row}`, `IF(F${row}>0,I${row}/F${row},0)`, revenue > 0 ? profit / revenue : 0);
     sheetXml = setXlsxCell(sheetXml, `K${row}`, projectProduct.proposalComment ?? '');
   });
 
@@ -205,15 +205,16 @@ export async function generateProfitAndLossXlsx(project: ProjectDocument) {
   sheetXml = setXlsxCell(sheetXml, 'B26', 0);
   sheetXml = setXlsxCell(sheetXml, 'B27', 0);
   sheetXml = setXlsxCell(sheetXml, 'B28', 0);
-  sheetXml = setXlsxCell(sheetXml, 'F21', totalRevenue);
-  sheetXml = setXlsxCell(sheetXml, 'H21', totalCost);
-  sheetXml = setXlsxCell(sheetXml, 'I21', totalProfit);
-  sheetXml = setXlsxCell(sheetXml, 'J21', grossMargin);
+  sheetXml = setXlsxFormula(sheetXml, 'F21', 'SUM(F9:F20)', totalRevenue);
+  sheetXml = setXlsxFormula(sheetXml, 'H21', 'SUM(H9:H20)', totalCost);
+  sheetXml = setXlsxFormula(sheetXml, 'I21', 'F21-H21', totalProfit);
+  sheetXml = setXlsxFormula(sheetXml, 'J21', 'IF(F21>0,I21/F21,0)', grossMargin);
   sheetXml = setXlsxCell(sheetXml, 'B29', 0);
-  sheetXml = setXlsxCell(sheetXml, 'N9', totalProfit);
+  sheetXml = setXlsxFormula(sheetXml, 'N9', 'I21', totalProfit);
 
   zip.file('xl/worksheets/sheet1.xml', sheetXml);
   setXlsxDefaultFont(zip, 'Yu Mincho');
+  forceXlsxWorkbookRecalculation(zip);
 
   return zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' });
 }
@@ -423,6 +424,36 @@ function setXlsxDefaultFont(zip: PizZip, fontName: string) {
   zip.file('xl/styles.xml', stylesXml);
 }
 
+function forceXlsxWorkbookRecalculation(zip: PizZip) {
+  const workbookFile = zip.file('xl/workbook.xml');
+  if (!workbookFile) return;
+
+  let workbookXml = workbookFile.asText();
+  const calcPrTag = workbookXml.includes('<x:workbook') ? 'x:calcPr' : 'calcPr';
+  const recalcAttributes = 'calcMode="auto" fullCalcOnLoad="1" forceFullCalc="1"';
+  const selfClosingCalcPrPattern = /<((?:\w+:)?calcPr)\b[^>]*\/>/;
+  const calcPrPattern = /<((?:\w+:)?calcPr)\b[^>]*>([\s\S]*?)<\/\1>/;
+
+  if (selfClosingCalcPrPattern.test(workbookXml)) {
+    workbookXml = workbookXml.replace(
+      selfClosingCalcPrPattern,
+      (_match, tagName: string) => `<${tagName} ${recalcAttributes}/>`
+    );
+  } else if (calcPrPattern.test(workbookXml)) {
+    workbookXml = workbookXml.replace(
+      calcPrPattern,
+      (_match, tagName: string, innerXml: string) => `<${tagName} ${recalcAttributes}>${innerXml}</${tagName}>`
+    );
+  } else {
+    workbookXml = workbookXml.replace(
+      /<\/((?:\w+:)?workbook)>/,
+      `<${calcPrTag} ${recalcAttributes}/></$1>`,
+    );
+  }
+
+  zip.file('xl/workbook.xml', workbookXml);
+}
+
 function setXlsxCell(xml: string, cell: string, value: string | number) {
   const selfClosingPattern = new RegExp(`(<x:c\\b[^>]*\\br="${cell}"[^>]*)\\s*/>`);
   const selfClosingMatch = xml.match(selfClosingPattern);
@@ -439,6 +470,22 @@ function setXlsxCell(xml: string, cell: string, value: string | number) {
   return xml.replace(cellPattern, renderXlsxCell(match[1], value));
 }
 
+function setXlsxFormula(xml: string, cell: string, formula: string, cachedValue: number) {
+  const selfClosingPattern = new RegExp(`(<x:c\\b[^>]*\\br="${cell}"[^>]*)\\s*/>`);
+  const selfClosingMatch = xml.match(selfClosingPattern);
+  if (selfClosingMatch) {
+    return xml.replace(selfClosingPattern, renderXlsxFormulaCell(selfClosingMatch[1], formula, cachedValue));
+  }
+
+  const cellPattern = new RegExp(`(<x:c\\b[^>]*\\br="${cell}"[^>]*>)([\\s\\S]*?)(</x:c>)`);
+  const match = xml.match(cellPattern);
+  if (!match) {
+    throw new Error(`P/L template cell ${cell} not found`);
+  }
+
+  return xml.replace(cellPattern, renderXlsxFormulaCell(match[1], formula, cachedValue));
+}
+
 function renderXlsxCell(startTag: string, value: string | number) {
   const isNumber = typeof value === 'number';
   const normalizedStartTag = startTag.replace(/\s+t="[^"]*"/, '').replace(/>$/, '');
@@ -446,6 +493,11 @@ function renderXlsxCell(startTag: string, value: string | number) {
   const cellValue = isNumber ? String(value) : escapeXml(value);
 
   return `${typedStartTag}<x:v>${cellValue}</x:v></x:c>`;
+}
+
+function renderXlsxFormulaCell(startTag: string, formula: string, cachedValue: number) {
+  const normalizedStartTag = startTag.replace(/\s+t="[^"]*"/, '').replace(/>$/, '');
+  return `${normalizedStartTag}><x:f>${escapeXml(formula)}</x:f><x:v>${cachedValue}</x:v></x:c>`;
 }
 
 function formatComparison(projectProduct?: ProjectProductDocument) {

@@ -16,7 +16,7 @@ import {
   uploadGeneratedDocument,
 } from '../documents/projectDocuments';
 
-const roles = [UserRole.ADMIN, UserRole.PRODUCT_MANAGER];
+const roles = [UserRole.ADMIN, UserRole.PRODUCT_MANAGER, UserRole.SALES];
 const generateSchema = z.object({
   force: z.boolean().optional().default(false),
 });
@@ -33,7 +33,10 @@ export function createProjectDocumentsRouter(
   router.get(
     '/:id/documents',
     asyncHandler(async (req, res) => {
-      await assertProjectExists(db, req.params.id);
+      await assertProjectExists(db, req.params.id, {
+        userId: req.user?.id,
+        role: req.user?.role,
+      });
       const files = await findProjectDocuments(db, req.params.id);
       const latest = latestByPurpose(files);
       res.json({
@@ -56,6 +59,7 @@ export function createProjectDocumentsRouter(
         purpose: documentPurposes.proposal,
         force: body.force,
         actorId: req.user?.id,
+        actorRole: req.user?.role,
         actorName: req.user?.name ?? '',
       });
       res.status(result.reused ? 200 : 201).json({ document: result.document, reused: result.reused });
@@ -74,6 +78,7 @@ export function createProjectDocumentsRouter(
         purpose: documentPurposes.profitAndLoss,
         force: body.force,
         actorId: req.user?.id,
+        actorRole: req.user?.role,
         actorName: req.user?.name ?? '',
       });
       res.status(result.reused ? 200 : 201).json({ document: result.document, reused: result.reused });
@@ -91,9 +96,13 @@ async function generateOrReuseDocument(input: {
   purpose: DocumentPurpose;
   force: boolean;
   actorId?: string;
+  actorRole?: UserRole;
   actorName: string;
 }) {
-  const project = await getProject(input.db, input.projectId);
+  const project = await getProject(input.db, input.projectId, {
+    userId: input.actorId,
+    role: input.actorRole,
+  });
   const existing = input.force ? null : await findLatestProjectDocument(input.db, input.projectId, input.purpose);
   if (existing) {
     await writeAuditLog(input.db, {
@@ -164,7 +173,11 @@ async function generatePlWithApiErrors(project: any) {
   }
 }
 
-async function getProject(db: DatabaseClient, projectId: string) {
+async function getProject(
+  db: DatabaseClient,
+  projectId: string,
+  viewer?: { userId?: string; role?: UserRole },
+) {
   const project = await db.project.findUnique({
     where: { id: projectId },
     include: projectInclude,
@@ -172,11 +185,14 @@ async function getProject(db: DatabaseClient, projectId: string) {
   if (!project || project.deletedAt) {
     throw new ApiError(404, 'Project not found', 'PROJECT_NOT_FOUND');
   }
+  if (viewer?.role === UserRole.SALES && project.assignedSalesUserId !== viewer.userId) {
+    throw new ApiError(403, 'Sales user cannot access documents for this project', 'PROJECT_DOCUMENT_FORBIDDEN');
+  }
   return project;
 }
 
-async function assertProjectExists(db: DatabaseClient, projectId: string) {
-  await getProject(db, projectId);
+async function assertProjectExists(db: DatabaseClient, projectId: string, viewer?: { userId?: string; role?: UserRole }) {
+  await getProject(db, projectId, viewer);
 }
 
 async function findProjectDocuments(db: DatabaseClient, projectId: string) {
@@ -214,8 +230,7 @@ function latestByPurpose(files: any[]) {
   }, {});
 }
 
-async function toDocumentDto(storage: StorageService, file: any) {
-  const downloadUrl = await storage.createDownloadUrl({ objectKey: file.objectKey });
+async function toDocumentDto(_storage: StorageService, file: any) {
   return {
     id: file.id,
     purpose: file.purpose,
@@ -223,7 +238,7 @@ async function toDocumentDto(storage: StorageService, file: any) {
     mimeType: file.mimeType,
     sizeBytes: file.sizeBytes,
     createdAt: file.createdAt,
-    downloadUrl,
+    downloadUrl: `/api/files/${encodeURIComponent(file.id)}/content`,
   };
 }
 

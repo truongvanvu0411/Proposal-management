@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+.codex-runtime
+.env
+.env.prod
+coverage
+*.log
+*.tmp
+Dockerfile*
+docker-compose*.override.yml

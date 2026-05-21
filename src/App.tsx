@@ -32,6 +32,7 @@ import {
   Plus,
   Filter,
   Download,
+  FileCheck2,
   AlertCircle,
   FileBarChart,
   Trash2,
@@ -67,8 +68,6 @@ import {
   ResponsiveContainer,
   BarChart,
   Bar,
-  AreaChart,
-  Area,
   PieChart,
   Pie,
   XAxis,
@@ -129,10 +128,18 @@ const deliveryMethodLabelMap: Record<ProjectProductDeliveryMethod, string> = {
   [ProjectProductDeliveryMethod.DIRECT]: '直送',
 };
 
-const stickyToolbarClass = 'sticky top-24 z-10 bg-white/90 backdrop-blur-md';
+const productStatusLabelMap: Record<ProductStatus, string> = {
+  [ProductStatus.DRAFT]: '下書き',
+  [ProductStatus.SUBMITTED]: '申請済み',
+  [ProductStatus.ACTIVE]: '通常',
+  [ProductStatus.PENDING_APPROVAL]: '承認待ち',
+  [ProductStatus.ADOPTED]: '採用済み',
+  [ProductStatus.INACTIVE]: '停止中',
+  [ProductStatus.CANCELLED]: '取消',
+};
 
-const logoIconSrc = '/assets/logo-icon.png';
-const logoTitleSrc = '/assets/logo-title.png';
+const stickyToolbarClass = 'sticky top-24 z-10 bg-white/90 backdrop-blur-md';
+const defaultPageSize = 12;
 
 const productCategoryOptions = [
   'キッチン用品',
@@ -147,9 +154,123 @@ const productCategoryOptions = [
   'ホーム・インテリア',
 ];
 
+const maxProductImages = 3;
+const maxProductImageMegabytes = 15;
+
+const isProductCurrentlyAvailable = (product: Product, referenceDate = new Date()) => {
+  const today = formatDateInputValue(referenceDate);
+  return (!product.availableFrom || product.availableFrom <= today) &&
+    (!product.availableTo || product.availableTo >= today);
+};
+
+const getProductDisplayImages = (product?: Product | null) => {
+  if (!product) return [];
+  if (product.images.length) return product.images;
+  return product.pendingChange?.imageDiffs
+    ?.filter((diff) => diff.type === 'ADD' && diff.url)
+    .map((diff) => diff.url as string) ?? [];
+};
+
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+const BrandMark = ({ className, iconClassName }: { className?: string; iconClassName?: string }) => (
+  <span
+    className={cn(
+      'inline-flex items-center justify-center rounded-2xl bg-primary text-white shadow-lg shadow-primary/20',
+      className,
+    )}
+    aria-hidden="true"
+  >
+    <FileCheck2 className={cn('stroke-[2.4]', iconClassName)} />
+  </span>
+);
+
+const BrandLogo = ({ variant = 'sidebar' }: { variant?: 'sidebar' | 'login' }) => {
+  if (variant === 'login') {
+    return (
+      <div className="flex flex-col items-center text-center">
+        <BrandMark className="h-20 w-20 rounded-[24px]" iconClassName="h-11 w-11" />
+        <div className="mt-5 space-y-2">
+          <p className="text-4xl font-black tracking-tight text-slate-950">提案一元管理</p>
+          <p className="text-xs font-black uppercase tracking-[0.32em] text-primary">Proposal Workflow Hub</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-w-0 items-center gap-3">
+      <BrandMark className="h-11 w-11 rounded-2xl" iconClassName="h-6 w-6" />
+      <div className="min-w-0">
+        <p className="truncate text-lg font-black tracking-tight text-slate-950">提案一元管理</p>
+        <p className="text-[9px] font-black uppercase tracking-[0.24em] text-primary">Workflow Hub</p>
+      </div>
+    </div>
+  );
+};
+
+function usePagination<T>(items: T[], pageSize = defaultPageSize) {
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+  useEffect(() => {
+    setPage(1);
+  }, [items, pageSize]);
+  useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
+  const pagedItems = useMemo(
+    () => items.slice((page - 1) * pageSize, page * pageSize),
+    [items, page, pageSize],
+  );
+  return { page, setPage, totalPages, pagedItems, pageSize, total: items.length };
+}
+
+const PaginationControls = ({
+  page,
+  totalPages,
+  total,
+  pageSize = defaultPageSize,
+  onPageChange,
+}: {
+  page: number;
+  totalPages: number;
+  total: number;
+  pageSize?: number;
+  onPageChange: (page: number) => void;
+}) => {
+  if (total <= pageSize) return null;
+  return (
+    <div className="flex flex-col gap-3 rounded-3xl border border-slate-100 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-xs font-black text-slate-400">
+        全{total.toLocaleString()}件中 {(page - 1) * pageSize + 1}-
+        {Math.min(page * pageSize, total).toLocaleString()}件を表示
+      </p>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.max(1, page - 1))}
+          disabled={page <= 1}
+          className="rounded-xl border border-slate-100 px-3 py-2 text-xs font-black text-slate-500 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          前へ
+        </button>
+        <span className="rounded-xl bg-primary-light px-3 py-2 text-xs font-black text-primary">
+          {page} / {totalPages}
+        </span>
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+          disabled={page >= totalPages}
+          className="rounded-xl border border-slate-100 px-3 py-2 text-xs font-black text-slate-500 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          次へ
+        </button>
+      </div>
+    </div>
+  );
+};
 
 type ToastTone = 'success' | 'error' | 'info';
 
@@ -361,7 +482,7 @@ const JapaneseDatePicker = ({
         <span className="min-w-0 flex-1 truncate">{selectedLabel}</span>
       </button>
       {isOpen && (
-        <div className="absolute left-0 top-[calc(100%+8px)] z-[180] w-[min(320px,calc(100vw-2rem))] rounded-3xl border border-primary/10 bg-white p-4 shadow-2xl shadow-slate-200/80">
+        <div className="absolute left-0 top-[calc(100%+8px)] z-[260] w-[min(320px,calc(100vw-2rem))] rounded-3xl border border-primary/10 bg-white p-4 shadow-2xl shadow-slate-200/80">
           <div className="mb-3 flex items-center justify-between gap-2">
             <button
               type="button"
@@ -509,26 +630,45 @@ const SidebarItem: React.FC<SidebarItemProps> = ({
 // Placeholder components for missing pages
 const AdoptionList = () => <div className="p-8 bg-white rounded-2xl border border-slate-100 font-bold text-slate-400 text-center">採用管理画面（開発中）</div>;
 const OrderManagement = () => <div className="p-8 bg-white rounded-2xl border border-slate-100 font-bold text-slate-400 text-center">発注管理画面（開発中）</div>;
-const ExportData = () => {
+const ExportData = ({ suppliers, clients }: { suppliers: Supplier[]; clients: Client[] }) => {
   const [loadingDataset, setLoadingDataset] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [activeDataset, setActiveDataset] = useState('adopted-products');
+  const [supplierFilter, setSupplierFilter] = useState('ALL');
+  const [clientFilter, setClientFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [productStatusFilter, setProductStatusFilter] = useState('ALL');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [includeImages, setIncludeImages] = useState(false);
   const datasets = [
-    { id: 'projects', label: '案件一覧データ', desc: '全プロジェクトの基本情報、顧客情報、合計収支。', icon: FileBarChart, format: 'CSV' },
-    { id: 'product-master', label: '商品マスタデータ', desc: '商品カタログの全マスタ情報（JAN、原価、上代等）。', icon: Package, format: 'CSV' },
-    { id: 'web-listing', label: 'Web掲載データ抽出', desc: 'ECサイトやWebカタログ掲載用の商品情報を抽出します。', icon: Globe, format: 'CSV' },
-    { id: 'internal-master', label: '社内用商品マスタ出力', desc: '基幹システム連携用の内部管理項目を含むフルデータ。', icon: LayoutDashboard, labelSuffix: ' (社内用)', format: 'CSV' },
-    { id: 'orders', label: '発注履歴データ', desc: '成約案件に基づく個別の発注・仕入れ実績。', icon: ShoppingCart, format: 'CSV' },
+    { id: 'adopted-products', label: '採用商品の出力', desc: '採用済みの商品コード、案件、顧客、売上、配送情報を抽出します。', icon: CheckCircle2, productRelated: true },
+    { id: 'projects', label: '案件一覧', desc: '案件の基本情報、顧客、ステータス、合計収支。', icon: FileBarChart, productRelated: false },
+    { id: 'product-master', label: '商品マスタ', desc: '商品カタログのJAN、原価、期限、画像メタ情報。', icon: Package, productRelated: true },
+    { id: 'web-listing', label: 'Web掲載', desc: 'Webカタログ掲載用の採用商品情報。', icon: Globe, productRelated: true },
+    { id: 'internal-master', label: '社内用マスタ', desc: '基幹システム連携用の内部管理項目を含むフルデータ。', icon: LayoutDashboard, productRelated: true },
+    { id: 'orders', label: '発注履歴', desc: '発注依頼、発送、受取ステータスの履歴。', icon: ShoppingCart, productRelated: false },
   ];
+  const activeDatasetMeta = datasets.find((dataset) => dataset.id === activeDataset) ?? datasets[0];
 
-  const handleDownload = async (dataset: string) => {
+  const handleDownload = async () => {
+    const dataset = activeDataset;
     setLoadingDataset(dataset);
     setExportError(null);
     try {
-      const { blob, filename } = await api.downloadExport(dataset);
+      const { blob, filename } = await api.downloadExport(dataset, {
+        supplierId: supplierFilter === 'ALL' ? undefined : supplierFilter,
+        clientId: clientFilter === 'ALL' ? undefined : clientFilter,
+        status: statusFilter === 'ALL' ? undefined : statusFilter,
+        productStatus: productStatusFilter === 'ALL' ? undefined : productStatusFilter,
+        fromDate,
+        toDate,
+        includeImages: includeImages && activeDatasetMeta.productRelated,
+      });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = filename || `${dataset}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.csv`;
+      link.download = filename || `${dataset}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.${includeImages ? 'zip' : 'csv'}`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -544,7 +684,7 @@ const ExportData = () => {
     <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">
       <div>
         <h1 className="text-2xl font-bold text-slate-800">データ出力</h1>
-        <p className="text-slate-500">業務データの外部出力およびバックアップを行います。</p>
+        <p className="text-slate-500">用途別のタブから、条件で絞り込んだCSV/画像ZIPを出力します。</p>
       </div>
 
       {exportError && (
@@ -553,40 +693,106 @@ const ExportData = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {datasets.map((d) => (
-          <div key={d.id} className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm hover:shadow-xl transition-all group flex flex-col items-center text-center">
-            <div className="p-4 bg-slate-50 rounded-2xl mb-6 group-hover:bg-primary group-hover:text-white transition-all">
-              <d.icon size={32} />
+      <div className="overflow-visible rounded-[32px] border border-slate-100 bg-white shadow-sm">
+        <div className="flex gap-2 overflow-x-auto border-b border-slate-100 p-3 custom-scrollbar">
+          {datasets.map((dataset) => (
+            <button
+              key={dataset.id}
+              type="button"
+              onClick={() => {
+                setActiveDataset(dataset.id);
+                if (!dataset.productRelated) setIncludeImages(false);
+              }}
+              className={cn(
+                "flex min-w-max items-center gap-2 rounded-2xl px-4 py-3 text-sm font-black transition-all",
+                activeDataset === dataset.id ? "bg-primary text-white shadow-lg shadow-primary/10" : "bg-slate-50 text-slate-500 hover:bg-primary-light hover:text-primary",
+              )}
+            >
+              <dataset.icon size={17} /> {dataset.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="grid gap-6 p-6 lg:grid-cols-[1fr_320px]">
+          <div className="space-y-4">
+            <div className="rounded-3xl bg-slate-50 p-5">
+              <div className="mb-1 flex items-center gap-2 text-primary">
+                <activeDatasetMeta.icon size={20} />
+                <h2 className="text-lg font-black">{activeDatasetMeta.label}</h2>
+              </div>
+              <p className="text-sm font-bold text-slate-500">{activeDatasetMeta.desc}</p>
             </div>
-            <h3 className="text-lg font-black text-slate-800 mb-2 truncate w-full px-2">
-              {d.label}
-              {d.labelSuffix && <span className="text-xs text-primary">{d.labelSuffix}</span>}
-            </h3>
-            <p className="text-xs text-slate-400 font-medium mb-6 leading-relaxed h-10 line-clamp-2">{d.desc}</p>
-            <div className="mt-auto w-full space-y-3">
-              <div className="text-[10px] font-black text-slate-300 uppercase tracking-widest">{d.format}</div>
-              <button
-                onClick={() => handleDownload(d.id)}
-                disabled={loadingDataset !== null}
-                className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-slate-800 transition-all shadow-lg shadow-slate-100 disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                <Download size={18} /> {loadingDataset === d.id ? '出力中...' : 'ダウンロード'}
-              </button>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <label className="relative">
+                <ShoppingCart className="absolute left-4 top-1/2 -translate-y-1/2 text-primary" size={16} />
+                <select value={supplierFilter} onChange={(event) => setSupplierFilter(event.target.value)} className="h-12 w-full appearance-none rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm font-black text-slate-600 outline-none">
+                  <option value="ALL">すべてのサプライヤー</option>
+                  {suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
+                </select>
+              </label>
+              <label className="relative">
+                <Users className="absolute left-4 top-1/2 -translate-y-1/2 text-primary" size={16} />
+                <select value={clientFilter} onChange={(event) => setClientFilter(event.target.value)} className="h-12 w-full appearance-none rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm font-black text-slate-600 outline-none">
+                  <option value="ALL">すべてのクライアント</option>
+                  {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+                </select>
+              </label>
+              <label className="relative">
+                <CheckCircle2 className="absolute left-4 top-1/2 -translate-y-1/2 text-primary" size={16} />
+                <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="h-12 w-full appearance-none rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm font-black text-slate-600 outline-none">
+                  <option value="ALL">ステータスすべて</option>
+                  {Object.entries(projectStatusMap).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  {Object.entries(orderStatusMap).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+              <label className="relative">
+                <Package className="absolute left-4 top-1/2 -translate-y-1/2 text-primary" size={16} />
+                <select value={productStatusFilter} onChange={(event) => setProductStatusFilter(event.target.value)} className="h-12 w-full appearance-none rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm font-black text-slate-600 outline-none">
+                  <option value="ALL">商品ステータスすべて</option>
+                  {Object.values(ProductStatus).map((status) => (
+                    <option key={status} value={status}>{productStatusLabelMap[status]}</option>
+                  ))}
+                </select>
+              </label>
+              <JapaneseDatePicker value={fromDate} onChange={(value) => {
+                setFromDate(value);
+                if (value && toDate && toDate < value) setToDate(value);
+              }} placeholder="開始日" />
+              <JapaneseDatePicker value={toDate} onChange={setToDate} placeholder="終了日" min={fromDate || undefined} />
             </div>
           </div>
-        ))}
-      </div>
 
-      <div className="bg-primary rounded-3xl p-10 text-white flex flex-col md:flex-row items-center justify-between gap-8 shadow-2xl shadow-primary/10 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -mr-32 -mt-32" />
-        <div className="space-y-2 relative z-10">
-            <h2 className="text-2xl font-black italic uppercase tracking-tighter">提案書自動生成</h2>
-            <p className="text-white/80 font-medium italic">最新の案件ステータスをAIが解析し、ワンクリックでPPTX形式の提案資料を自動構成します。</p>
+          <div className="flex flex-col justify-between rounded-3xl border border-slate-100 bg-slate-50 p-5">
+            <div className="space-y-4">
+              <p className="text-xs font-black text-slate-400 uppercase tracking-widest">出力形式</p>
+              <label className={cn(
+                "flex items-center justify-between rounded-2xl border bg-white p-4",
+                activeDatasetMeta.productRelated ? "border-slate-100" : "border-slate-100 opacity-50",
+              )}>
+                <span>
+                  <span className="block text-sm font-black text-slate-800">画像フォルダも出力</span>
+                  <span className="text-xs font-bold text-slate-400">CSV + images のZIP形式</span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={includeImages && activeDatasetMeta.productRelated}
+                  disabled={!activeDatasetMeta.productRelated}
+                  onChange={(event) => setIncludeImages(event.target.checked)}
+                  className="h-5 w-5 accent-primary"
+                />
+              </label>
+            </div>
+            <button
+              onClick={handleDownload}
+              disabled={loadingDataset !== null}
+              className="mt-6 w-full rounded-2xl bg-slate-900 py-4 font-black text-white shadow-lg shadow-slate-100 transition-all hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Download size={18} className="mr-2 inline" />
+              {loadingDataset === activeDataset ? '出力中...' : includeImages && activeDatasetMeta.productRelated ? 'ZIPをダウンロード' : 'CSVをダウンロード'}
+            </button>
+          </div>
         </div>
-        <button className="px-8 py-4 bg-white text-primary rounded-2xl font-black flex items-center gap-3 hover:scale-105 transition-all shadow-xl relative z-10">
-          <FileText size={20} /> 統合出力ウィザードを起動
-        </button>
       </div>
     </div>
   );
@@ -603,6 +809,7 @@ const ProductCatalog = ({
   onSelect,
   isSelectionMode = false,
   onNotify,
+  adoptedProductIds = [],
 }: {
   products: Product[],
   suppliers?: Supplier[],
@@ -614,6 +821,7 @@ const ProductCatalog = ({
   onSelect?: (p: Product) => void,
   isSelectionMode?: boolean,
   onNotify?: (toast: Omit<ToastMessage, 'id'>) => void,
+  adoptedProductIds?: string[],
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -631,12 +839,19 @@ const ProductCatalog = ({
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [supplierFilter, setSupplierFilter] = useState('ALL');
   const [productStatusFilter, setProductStatusFilter] = useState<'ALL' | 'NORMAL' | ProductStatus.PENDING_APPROVAL>('ALL');
+  const [adoptionFilter, setAdoptionFilter] = useState<'ALL' | 'ADOPTED' | 'NOT_ADOPTED'>('ALL');
+  const [availabilityFilter, setAvailabilityFilter] = useState<'ALL' | 'AVAILABLE' | 'EXPIRED' | 'FUTURE' | 'RANGE'>('ALL');
+  const [availabilityFrom, setAvailabilityFrom] = useState('');
+  const [availabilityTo, setAvailabilityTo] = useState('');
   const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
   const [selectedImageFiles, setSelectedImageFiles] = useState<File[]>([]);
   const [selectedImagePreviews, setSelectedImagePreviews] = useState<Array<{ file: File; url: string }>>([]);
+  const [productAvailableFrom, setProductAvailableFrom] = useState('');
+  const [productAvailableTo, setProductAvailableTo] = useState('');
   const canManageProducts = currentUser
     ? [UserRole.ADMIN, UserRole.SUPPLIER].includes(currentUser.role)
     : false;
+  const adoptedProductIdSet = useMemo(() => new Set(adoptedProductIds), [adoptedProductIds]);
 
   const catalogCategories = useMemo(
     () => {
@@ -672,9 +887,35 @@ const ProductCatalog = ({
         (productStatusFilter === 'NORMAL'
           ? product.status !== ProductStatus.PENDING_APPROVAL
           : product.status === ProductStatus.PENDING_APPROVAL);
-      return matchesSearch && matchesCategory && matchesSupplier && matchesStatus;
+      const isAdoptedInProject = adoptedProductIdSet.has(product.id);
+      const matchesAdoption =
+        adoptionFilter === 'ALL' ||
+        (adoptionFilter === 'ADOPTED' ? isAdoptedInProject : !isAdoptedInProject);
+      const today = formatDateInputValue(new Date());
+      const isExpired = Boolean(product.availableTo && product.availableTo < today);
+      const isFuture = Boolean(product.availableFrom && product.availableFrom > today);
+      const isAvailable = isProductCurrentlyAvailable(product);
+      const matchesAvailability =
+        isSelectionMode
+          ? isAvailable && product.status === ProductStatus.ACTIVE
+          : availabilityFilter === 'ALL' ||
+            (availabilityFilter === 'AVAILABLE' && isAvailable) ||
+            (availabilityFilter === 'EXPIRED' && isExpired) ||
+            (availabilityFilter === 'FUTURE' && isFuture) ||
+            (availabilityFilter === 'RANGE' &&
+              (!availabilityFrom || !product.availableTo || product.availableTo >= availabilityFrom) &&
+              (!availabilityTo || !product.availableFrom || product.availableFrom <= availabilityTo));
+      return matchesSearch && matchesCategory && matchesSupplier && matchesStatus && matchesAdoption && matchesAvailability;
     });
-  }, [categoryFilter, productStatusFilter, products, searchQuery, supplierFilter]);
+  }, [adoptedProductIdSet, adoptionFilter, availabilityFilter, availabilityFrom, availabilityTo, categoryFilter, isSelectionMode, productStatusFilter, products, searchQuery, supplierFilter]);
+  const {
+    page: productPage,
+    setPage: setProductPage,
+    totalPages: productTotalPages,
+    pagedItems: pagedProducts,
+    pageSize: productPageSize,
+    total: productTotal,
+  } = usePagination(filteredProducts, isSelectionMode ? 9 : defaultPageSize);
   const duplicateJanProduct = useMemo(() => {
     const normalizedJanCode = janCodeDraft.trim().toLowerCase();
     if (!normalizedJanCode) return undefined;
@@ -748,6 +989,8 @@ const ProductCatalog = ({
     setProductFormError('');
     setPreviewImage(null);
     setSelectedImageFiles([]);
+    setProductAvailableFrom('');
+    setProductAvailableTo('');
   };
 
   const openCreateProductModal = () => {
@@ -756,6 +999,8 @@ const ProductCatalog = ({
     setJanCodeAvailability({ status: 'idle' });
     setProductFormError('');
     setSelectedImageFiles([]);
+    setProductAvailableFrom('');
+    setProductAvailableTo('');
     setModalTab('INFO');
     setIsCudModalOpen(true);
   };
@@ -766,6 +1011,8 @@ const ProductCatalog = ({
     setJanCodeAvailability({ status: 'idle' });
     setProductFormError('');
     setSelectedImageFiles([]);
+    setProductAvailableFrom(product.availableFrom ?? '');
+    setProductAvailableTo(product.availableTo ?? '');
     setModalTab('INFO');
     setIsCudModalOpen(true);
   };
@@ -780,6 +1027,14 @@ const ProductCatalog = ({
     const submittedListPrice = isSupplierUser
       ? submittedCost
       : Number(formData.get('listPrice') ?? submittedCost);
+    const availableFrom = productAvailableFrom;
+    const availableTo = productAvailableTo;
+    if (availableFrom && availableTo && availableFrom > availableTo) {
+      const message = '商品期限の開始日は終了日以前にしてください。';
+      setProductFormError(message);
+      onNotify?.({ tone: 'error', title: '商品期限を確認してください', message });
+      return;
+    }
     const duplicateProduct = products.find((product) =>
       product.id !== editingProduct?.id &&
       product.janCode.trim().toLowerCase() === submittedJanCode.toLowerCase()
@@ -849,6 +1104,8 @@ const ProductCatalog = ({
           minLot: Number(formData.get('minLot')) || 1,
           leadTime: formData.get('leadTime') as string || editingProduct.leadTime,
           description: formData.get('description') as string,
+          availableFrom: availableFrom || undefined,
+          availableTo: availableTo || undefined,
           supplierId,
           supplierName: supplier?.name ?? editingProduct.supplierName,
           status: ProductStatus.PENDING_APPROVAL,
@@ -902,6 +1159,8 @@ const ProductCatalog = ({
           productType: ProductType.WAREHOUSE,
           minLot: Number(formData.get('minLot')) || 1,
           leadTime: formData.get('leadTime') as string || '3 days',
+          availableFrom: availableFrom || undefined,
+          availableTo: availableTo || undefined,
           attachments: [],
           createdAt: new Date().toISOString().split('T')[0],
           version: 1,
@@ -950,7 +1209,7 @@ const ProductCatalog = ({
 
       <div className={cn(
         !isSelectionMode && stickyToolbarClass,
-        "grid grid-cols-1 gap-3 rounded-3xl border border-slate-100 bg-white/90 p-4 shadow-sm backdrop-blur-md md:grid-cols-3",
+        "grid grid-cols-1 gap-3 rounded-3xl border border-slate-100 bg-white/90 p-4 shadow-sm backdrop-blur-md md:grid-cols-2 lg:grid-cols-5",
         isSelectionMode && "border-slate-200 bg-slate-50/80 shadow-none",
       )}>
           <label className="relative">
@@ -991,6 +1250,38 @@ const ProductCatalog = ({
               <option value={ProductStatus.PENDING_APPROVAL}>承認待ち</option>
             </select>
           </label>
+          <label className="relative">
+            <Check className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <select
+              value={adoptionFilter}
+              onChange={(event) => setAdoptionFilter(event.target.value as 'ALL' | 'ADOPTED' | 'NOT_ADOPTED')}
+              className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-600 outline-none appearance-none"
+            >
+              <option value="ALL">採用状態すべて</option>
+              <option value="ADOPTED">採用済み</option>
+              <option value="NOT_ADOPTED">未採用</option>
+            </select>
+          </label>
+          <label className="relative">
+            <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <select
+              value={availabilityFilter}
+              onChange={(event) => setAvailabilityFilter(event.target.value as 'ALL' | 'AVAILABLE' | 'EXPIRED' | 'FUTURE' | 'RANGE')}
+              className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-600 outline-none appearance-none"
+            >
+              <option value="ALL">期限すべて</option>
+              <option value="AVAILABLE">提案可能</option>
+              <option value="EXPIRED">期限切れ</option>
+              <option value="FUTURE">開始前</option>
+              <option value="RANGE">期限範囲</option>
+            </select>
+          </label>
+          {availabilityFilter === 'RANGE' && (
+            <div className="grid grid-cols-2 gap-2 md:col-span-2 lg:col-span-5">
+              <JapaneseDatePicker value={availabilityFrom} onChange={setAvailabilityFrom} placeholder="期限From" />
+              <JapaneseDatePicker value={availabilityTo} onChange={setAvailabilityTo} placeholder="期限To" min={availabilityFrom || undefined} />
+            </div>
+          )}
         </div>
 
       <div className={cn(
@@ -999,7 +1290,10 @@ const ProductCatalog = ({
           ? "grid-cols-1 sm:grid-cols-2 xl:grid-cols-3"
           : "grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5",
       )}>
-        {filteredProducts.map((product) => (
+        {pagedProducts.map((product) => {
+          const displayImages = getProductDisplayImages(product);
+          const isPendingImagePreview = !product.images.length && displayImages.length > 0;
+          return (
           <motion.div
             key={product.id}
             whileHover={{ y: -5 }}
@@ -1009,8 +1303,15 @@ const ProductCatalog = ({
             )}
           >
             <div className={cn("relative overflow-hidden bg-slate-50", isSelectionMode ? "aspect-[4/3]" : "aspect-square")}>
-              {product.images[0] ? (
-                <img src={product.images[0]} alt={product.name} loading="lazy" decoding="async" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
+              {displayImages[0] ? (
+                <>
+                  <img src={displayImages[0]} alt={product.name} loading="lazy" decoding="async" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
+                  {isPendingImagePreview && (
+                    <span className="absolute bottom-3 left-3 rounded-full bg-amber-50 px-3 py-1 text-[10px] font-black text-amber-600 shadow-sm ring-1 ring-amber-100">
+                      承認待ち画像
+                    </span>
+                  )}
+                </>
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-slate-300">
                   <ImageIcon size={40} />
@@ -1077,8 +1378,10 @@ const ProductCatalog = ({
               </div>
             </div>
           </motion.div>
-        ))}
+        );
+        })}
       </div>
+      <PaginationControls page={productPage} totalPages={productTotalPages} total={productTotal} pageSize={productPageSize} onPageChange={setProductPage} />
 
       {isCudModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-start justify-center p-6 overflow-y-auto custom-scrollbar">
@@ -1199,12 +1502,33 @@ const ProductCatalog = ({
                         onChange={(event) => {
                           const files = Array.from(event.currentTarget.files ?? []);
                           if (files.length) {
-                            setSelectedImageFiles((current) => [...current, ...files]);
+                            const currentImageCount = editingProduct?.imageAssets?.length ?? editingProduct?.images?.length ?? 0;
+                            const remainingSlots = maxProductImages - currentImageCount - selectedImageFiles.length;
+                            if (remainingSlots <= 0) {
+                              onNotify?.({
+                                tone: 'error',
+                                title: '画像数の上限です',
+                                message: `商品画像は最大${maxProductImages}枚まで登録できます。`,
+                              });
+                            } else {
+                              const accepted = files.slice(0, remainingSlots);
+                              setSelectedImageFiles((current) => [...current, ...accepted]);
+                              if (accepted.length < files.length) {
+                                onNotify?.({
+                                  tone: 'info',
+                                  title: '一部の画像のみ追加しました',
+                                  message: `商品画像は最大${maxProductImages}枚までです。`,
+                                });
+                              }
+                            }
                           }
                           event.currentTarget.value = '';
                         }}
                         className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold file:mr-3 file:border-0 file:bg-primary-light file:text-primary file:rounded-lg file:px-3 file:py-2 file:font-black"
                       />
+                      <p className="text-[11px] font-bold text-slate-400">
+                        JPEG / PNG / WebP、最大{maxProductImages}枚、1枚あたり{maxProductImageMegabytes}MBまで。
+                      </p>
                       {(editingProduct?.imageAssets?.length || editingProduct?.images?.length || selectedImagePreviews.length) ? (
                         <div className="flex gap-2 overflow-x-auto pb-1 pt-1 custom-scrollbar">
                           {editingProduct?.imageAssets?.length
@@ -1314,6 +1638,28 @@ const ProductCatalog = ({
                       <label className="text-xs font-black text-slate-500 uppercase">最小ロット</label>
                       <input name="minLot" type="number" min={1} defaultValue={editingProduct?.minLot ?? 1} required className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary/20 outline-none transition-all" />
                     </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-black text-slate-500 uppercase">商品期限</label>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <JapaneseDatePicker
+                        value={productAvailableFrom}
+                        onChange={(value) => {
+                          setProductAvailableFrom(value);
+                          if (value && productAvailableTo && productAvailableTo < value) {
+                            setProductAvailableTo(value);
+                          }
+                        }}
+                        placeholder="開始日"
+                      />
+                      <JapaneseDatePicker
+                        value={productAvailableTo}
+                        onChange={setProductAvailableTo}
+                        placeholder="終了日"
+                        min={productAvailableFrom || undefined}
+                      />
+                    </div>
+                    <p className="text-[11px] font-bold text-slate-400">期限外の商品は案件作成時の提案候補に表示されません。</p>
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-black text-slate-500 uppercase">商品説明 (今回の更新内容をここに記述してください)</label>
@@ -1799,10 +2145,11 @@ const ProjectWizard = ({
                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {projectData.products?.map(pp => {
                       const product = products.find(d => d.id === pp.productId);
+                      const displayImages = getProductDisplayImages(product);
                       return (
                         <div key={pp.productId} className="p-5 bg-white border border-slate-100 rounded-3xl shadow-sm space-y-4 group hover:shadow-lg transition-all">
                            <div className="flex items-center gap-3">
-                              <img src={product?.images[0]} loading="lazy" decoding="async" className="w-12 h-12 rounded-xl object-cover bg-slate-50" alt="" />
+                              <img src={displayImages[0]} loading="lazy" decoding="async" className="w-12 h-12 rounded-xl object-cover bg-slate-50" alt="" />
                               <div className="flex-1 min-w-0">
                                  <p className="text-xs font-black text-slate-900 truncate uppercase">{product?.name}</p>
                                  <p className="text-[10px] text-slate-400 font-bold">¥{product?.listPrice.toLocaleString()}</p>
@@ -1825,12 +2172,13 @@ const ProjectWizard = ({
                <div className="space-y-6">
                   {projectData.products?.map(pp => {
                      const product = products.find(d => d.id === pp.productId);
+                     const displayImages = getProductDisplayImages(product);
                      return (
                         <div key={pp.productId} className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm space-y-6">
                            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                               <div className="flex min-w-0 items-center gap-4">
-                                 {product?.images[0] ? (
-                                   <img src={product.images[0]} loading="lazy" decoding="async" className="h-16 w-16 shrink-0 rounded-2xl object-cover bg-slate-50 shadow-sm" alt="" />
+                                 {displayImages[0] ? (
+                                   <img src={displayImages[0]} loading="lazy" decoding="async" className="h-16 w-16 shrink-0 rounded-2xl object-cover bg-slate-50 shadow-sm" alt="" />
                                  ) : (
                                    <div className="h-16 w-16 shrink-0 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-300 shadow-sm">
                                      <ImageIcon size={24} />
@@ -2064,9 +2412,10 @@ const ProjectWizard = ({
                <div className="flex gap-2 overflow-x-auto pb-4 custom-scrollbar">
                   {projectData.products?.map(pp => {
                     const product = products.find(d => d.id === pp.productId);
+                    const displayImages = getProductDisplayImages(product);
                     return (
                       <div key={pp.productId} className="flex-shrink-0 relative">
-                         <img src={product?.images[0]} loading="lazy" decoding="async" className="w-14 h-14 rounded-xl object-cover bg-slate-50 border border-slate-200" alt="" />
+                         <img src={displayImages[0]} loading="lazy" decoding="async" className="w-14 h-14 rounded-xl object-cover bg-slate-50 border border-slate-200" alt="" />
                          <button
                             onClick={() => removeProduct(pp.productId)}
                             className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full shadow-lg"
@@ -2156,6 +2505,7 @@ const ProjectManagement = ({
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [draftProjectForEdit, setDraftProjectForEdit] = useState<Project | null>(null);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [hasProjectDetailChanges, setHasProjectDetailChanges] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<ProjectStatus | 'ALL'>('ALL');
   const [clientFilter, setClientFilter] = useState('ALL');
@@ -2169,6 +2519,7 @@ const ProjectManagement = ({
   const [documentError, setDocumentError] = useState<string | null>(null);
   const location = useLocation();
   const canManageProjects = currentUser?.role === UserRole.ADMIN || currentUser?.role === UserRole.PRODUCT_MANAGER;
+  const canUseProjectDocuments = canManageProjects || currentUser?.role === UserRole.SALES;
   const isSupplierUser = currentUser?.role === UserRole.SUPPLIER;
   const salesUsers = useMemo(() => users.filter((user) => user.role === UserRole.SALES && !user.deleted), [users]);
   const supplierOrderNotifications = useMemo(
@@ -2187,9 +2538,21 @@ const ProjectManagement = ({
   const handleUpdateProject = (updated: Project) => {
     onUpdate(updated);
     setSelectedProject(updated);
+    setHasProjectDetailChanges(false);
     setIsEditingProject(false);
     setDraftProjectForEdit(null);
     setIsWizardOpen(false);
+  };
+
+  const stageProjectUpdate = (updated: Project) => {
+    setSelectedProject(updated);
+    setHasProjectDetailChanges(true);
+    setIsEditingProject(false);
+  };
+
+  const handleRegisterProjectDetail = () => {
+    if (!selectedProject) return;
+    handleUpdateProject(selectedProject);
   };
 
   const handleSaveProjectDraft = (project: Project) => {
@@ -2203,6 +2566,7 @@ const ProjectManagement = ({
   const handleDeleteProject = (id: string) => {
     onDelete(id);
     setSelectedProject(null);
+    setHasProjectDetailChanges(false);
   };
 
   const applyOrderStatusToSelectedProject = (updatedOrder: OrderRequest) => {
@@ -2248,10 +2612,11 @@ const ProjectManagement = ({
     const project = projects.find((item) => item.id === projectId);
     if (!project) return;
     setSelectedProject(project);
+    setHasProjectDetailChanges(false);
     setActiveTab(params.get('tab') === 'ORDERS' ? 'ORDERS' : 'DETAILS');
     setProjectDocuments([]);
-    if (canManageProjects) loadProjectDocuments(project.id);
-  }, [canManageProjects, loadProjectDocuments, location.search, projects]);
+    if (canUseProjectDocuments) loadProjectDocuments(project.id);
+  }, [canUseProjectDocuments, loadProjectDocuments, location.search, projects]);
 
   const openGeneratedDocument = (document: GeneratedDocument) => {
     const link = window.document.createElement('a');
@@ -2318,6 +2683,58 @@ const ProjectManagement = ({
       return matchesSearch && matchesStatus && matchesClient && matchesComposition;
     });
   }, [clientFilter, projectCompositionFilter, projects, searchQuery, statusFilter]);
+  const {
+    page: projectPage,
+    setPage: setProjectPage,
+    totalPages: projectTotalPages,
+    pagedItems: pagedProjects,
+    total: projectTotal,
+  } = usePagination(filteredProjects);
+
+  const updateSelectedProjectProducts = (productsToSave: ProjectProduct[]) => {
+    if (!selectedProject) return;
+    stageProjectUpdate({
+      ...selectedProject,
+      products: productsToSave,
+      updatedAt: new Date().toISOString().split('T')[0],
+    });
+  };
+
+  const setSelectedProjectAdoption = (productIds: string[], adopted: boolean) => {
+    if (!selectedProject) return;
+    if (selectedProject.status !== ProjectStatus.ADOPTED) {
+      onNotify?.({
+        tone: 'info',
+        title: '成約後に採用登録できます',
+        message: '案件ステータスを成約に変更してから採用・不採用を設定してください。',
+      });
+      return;
+    }
+    const today = new Date().toISOString().split('T')[0];
+    const targetIds = new Set(productIds);
+    const nextProducts = selectedProject.products.map((product) => {
+      if (!targetIds.has(product.productId)) return product;
+      return {
+        ...product,
+        isAdopted: adopted,
+        adoptionDate: adopted ? (product.adoptionDate || today) : undefined,
+        companyProductCode: adopted ? product.companyProductCode : undefined,
+        allowPublish: adopted ? (product.allowPublish ?? false) : false,
+        allowOrder: adopted ? product.allowOrder : false,
+      };
+    });
+    updateSelectedProjectProducts(nextProducts);
+  };
+
+  const updateSelectedProjectProductCode = (productId: string, companyProductCode: string) => {
+    if (!selectedProject) return;
+    const nextProducts = selectedProject.products.map((product) =>
+      product.productId === productId
+        ? { ...product, companyProductCode: product.isAdopted ? companyProductCode.trim() : undefined }
+        : product,
+    );
+    updateSelectedProjectProducts(nextProducts);
+  };
 
   if (isWizardOpen) {
     return (
@@ -2345,7 +2762,7 @@ const ProjectManagement = ({
             <h1 className="text-2xl font-bold text-slate-800">{isSupplierUser ? '関連案件・発注通知' : '案件管理'}</h1>
             <p className="text-slate-500">
               {isSupplierUser
-                ? '自社商品に発注依頼が届いた案件のみ確認できます。'
+                ? '自社商品が採用された案件と発注状況を確認できます。'
                 : '提案中の案件および成約済み案件の管理を行います。'}
             </p>
           </div>
@@ -2431,7 +2848,7 @@ const ProjectManagement = ({
         </div>
 
         <div className="grid grid-cols-1 gap-4">
-          {filteredProjects.map((proj) => (
+          {pagedProjects.map((proj) => (
             <div key={proj.id} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-xl transition-all flex flex-col md:flex-row md:items-center justify-between gap-6 group">
               <div className="flex items-center gap-4 flex-1">
                 <div className={cn(
@@ -2489,9 +2906,10 @@ const ProjectManagement = ({
                 <button
                   onClick={() => {
                     setSelectedProject(proj);
+                    setHasProjectDetailChanges(false);
                     setProjectDocuments([]);
                     setActiveTab((isSupplierUser && (proj.orderRequests?.length ?? 0) > 0) ? 'ORDERS' : 'DETAILS');
-                    if (canManageProjects) loadProjectDocuments(proj.id);
+                    if (canUseProjectDocuments) loadProjectDocuments(proj.id);
                   }}
                   className="px-6 py-3 bg-slate-900 text-white rounded-xl font-black text-sm hover:bg-slate-800 transition-all shadow-xl shadow-slate-100"
                 >
@@ -2501,11 +2919,18 @@ const ProjectManagement = ({
             </div>
           ))}
         </div>
+        <PaginationControls page={projectPage} totalPages={projectTotalPages} total={projectTotal} onPageChange={setProjectPage} />
       </div>
 
       {selectedProject && (
         <div className="fixed inset-0 z-[60] flex items-center justify-end overflow-hidden">
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setSelectedProject(null)} />
+          <div
+            className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+            onClick={() => {
+              setSelectedProject(null);
+              setHasProjectDetailChanges(false);
+            }}
+          />
           <motion.div
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
@@ -2516,7 +2941,13 @@ const ProjectManagement = ({
 
             <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
                <div className="flex items-center gap-3">
-                <button onClick={() => setSelectedProject(null)} className="p-2 hover:bg-white rounded-full transition-colors text-slate-400">
+                <button
+                  onClick={() => {
+                    setSelectedProject(null);
+                    setHasProjectDetailChanges(false);
+                  }}
+                  className="p-2 hover:bg-white rounded-full transition-colors text-slate-400"
+                >
                   <X size={24} />
                 </button>
                 <h2 className="text-xl font-black text-slate-900">案件詳細マネージャ</h2>
@@ -2538,7 +2969,7 @@ const ProjectManagement = ({
                    <select
                      className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs font-black text-slate-600 outline-none"
                      value={selectedProject.assignedSalesUserId ?? ''}
-                     onChange={(e) => handleUpdateProject({
+                     onChange={(e) => stageProjectUpdate({
                        ...selectedProject,
                        assignedSalesUserId: e.target.value || undefined,
                        assignedSalesUserName: salesUsers.find(user => user.id === e.target.value)?.name,
@@ -2555,7 +2986,7 @@ const ProjectManagement = ({
                    <select
                      className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs font-black text-slate-600 outline-none"
                      value={selectedProject.status}
-                     onChange={(e) => handleUpdateProject({ ...selectedProject, status: e.target.value as ProjectStatus, updatedAt: new Date().toISOString().split('T')[0] })}
+                     onChange={(e) => stageProjectUpdate({ ...selectedProject, status: e.target.value as ProjectStatus, updatedAt: new Date().toISOString().split('T')[0] })}
                    >
                      {Object.values(ProjectStatus).map(s => (
                        <option key={s} value={s}>{projectStatusMap[s] ?? s}</option>
@@ -2563,6 +2994,26 @@ const ProjectManagement = ({
                    </select>
                  )}
                  <Badge status={selectedProject.status}>{projectStatusMap[selectedProject.status] || selectedProject.status}</Badge>
+                 {hasProjectDetailChanges && (
+                   <span className="rounded-full bg-amber-50 px-3 py-1.5 text-[10px] font-black text-amber-600 border border-amber-100">
+                     未登録の変更あり
+                   </span>
+                 )}
+                 {canManageProjects && (
+                   <button
+                     type="button"
+                     onClick={handleRegisterProjectDetail}
+                     disabled={!hasProjectDetailChanges}
+                     className={cn(
+                       "px-5 py-2.5 rounded-xl text-sm font-black transition-all",
+                       hasProjectDetailChanges
+                         ? "bg-primary text-white shadow-lg shadow-primary/10 hover:bg-emerald-700"
+                         : "bg-slate-100 text-slate-400 cursor-not-allowed",
+                     )}
+                   >
+                     登録
+                   </button>
+                 )}
                  {canManageProjects && (
                    <button
                      onClick={() => handleDeleteProject(selectedProject.id)}
@@ -2607,7 +3058,7 @@ const ProjectManagement = ({
                            const formData = new FormData(e.target as HTMLFormElement);
                            const clientId = formData.get('clientId') as string;
                            const client = clients.find(c => c.id === clientId);
-                           handleUpdateProject({
+                           stageProjectUpdate({
                               ...selectedProject,
                               title: formData.get('title') as string,
                               proposalBackground: formData.get('proposalBackground') as string,
@@ -2729,7 +3180,7 @@ const ProjectManagement = ({
                     </div>
                   )}
 
-                  {canManageProjects && (
+                  {canUseProjectDocuments && (
                   <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 space-y-4">
                     <div>
                       <h4 className="font-black text-slate-800 text-lg flex items-center gap-2">
@@ -2765,14 +3216,66 @@ const ProjectManagement = ({
                   )}
 
                   <div className="space-y-6">
-                    <h4 className="font-black text-slate-800 text-lg flex items-center gap-2">
-                      <Package className="text-primary" size={20} />
-                      提案中商品リスト
-                    </h4>
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <h4 className="font-black text-slate-800 text-lg flex items-center gap-2">
+                        <Package className="text-primary" size={20} />
+                        提案中商品リスト
+                      </h4>
+                      {canManageProjects && selectedProject.products.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            disabled={selectedProject.status !== ProjectStatus.ADOPTED}
+                            onClick={() => setSelectedProjectAdoption(selectedProject.products.map((product) => product.productId), true)}
+                            className={cn(
+                              "rounded-2xl px-4 py-2.5 text-xs font-black transition-all",
+                              selectedProject.status === ProjectStatus.ADOPTED ? "bg-primary text-white hover:bg-emerald-700" : "bg-slate-100 text-slate-400 cursor-not-allowed",
+                            )}
+                          >
+                            全部採用
+                          </button>
+                          <button
+                            type="button"
+                            disabled={selectedProject.status !== ProjectStatus.ADOPTED}
+                            onClick={() => setSelectedProjectAdoption(selectedProject.products.map((product) => product.productId), false)}
+                            className={cn(
+                              "rounded-2xl px-4 py-2.5 text-xs font-black transition-all",
+                              selectedProject.status === ProjectStatus.ADOPTED ? "bg-red-50 text-red-500 hover:bg-red-100" : "bg-slate-100 text-slate-400 cursor-not-allowed",
+                            )}
+                          >
+                            全部不採用
+                          </button>
+                        </div>
+                      )}
+                    </div>
 
                     <div className="space-y-4">
                       {selectedProject.products.filter(pp => !pp.allowOrder).length > 0 ? selectedProject.products.filter(pp => !pp.allowOrder).map(pp => {
                         const product = products.find(d => d.id === pp.productId);
+                        const displayImages = getProductDisplayImages(product);
+                        const adoptionCodeInputId = `adoption-code-${selectedProject.id}-${pp.productId}`;
+                        const adoptionBadgeLabel = pp.isAdopted
+                          ? '採用済み'
+                          : selectedProject.status === ProjectStatus.ADOPTED
+                            ? '不採用'
+                            : '提案中';
+                        const adoptionBadgeStatus = pp.isAdopted
+                          ? 'ADOPTED'
+                          : selectedProject.status === ProjectStatus.ADOPTED
+                            ? 'REJECTED'
+                            : 'PROPOSED';
+
+                        const handleToggleAdoptionTag = () => {
+                          if (selectedProject.status !== ProjectStatus.ADOPTED) {
+                            onNotify?.({
+                              tone: 'info',
+                              title: '成約後に採用登録できます',
+                              message: '案件ステータスを成約に変更してから採用商品として登録してください。',
+                            });
+                            return;
+                          }
+                          setSelectedProjectAdoption([pp.productId], !pp.isAdopted);
+                        };
 
                         const handleAdoptProduct = () => {
                            if (selectedProject.status !== ProjectStatus.ADOPTED) {
@@ -2790,7 +3293,7 @@ const ProjectManagement = ({
                                    ...p,
                                    isAdopted: true,
                                    adoptionDate: p.adoptionDate || today,
-                                   companyProductCode: p.companyProductCode || `CMP-${today.replace(/-/g, '')}-${pp.productId.slice(0, 6)}`,
+                                   companyProductCode: p.companyProductCode,
                                    allowPublish: p.allowPublish ?? false,
                                    allowOrder: true,
                                  }
@@ -2811,7 +3314,7 @@ const ProjectManagement = ({
                              deliveryLocation: selectedProject.clientName
                            };
 
-                           handleUpdateProject({
+                           stageProjectUpdate({
                              ...selectedProject,
                              products: updatedProducts,
                              orderRequests: [...(selectedProject.orderRequests || []), newOrderRequest],
@@ -2821,12 +3324,12 @@ const ProjectManagement = ({
 
                         return (
                           <div key={pp.productId} className="p-6 bg-white border border-slate-100 rounded-3xl flex flex-col md:flex-row items-center gap-6 group hover:border-primary/20 transition-all">
-                             <img src={product?.images[0]} loading="lazy" decoding="async" className="w-20 h-20 rounded-2xl object-cover bg-slate-50 border border-slate-100" alt="" />
+                             <img src={displayImages[0]} loading="lazy" decoding="async" className="w-20 h-20 rounded-2xl object-cover bg-slate-50 border border-slate-100" alt="" />
                              <div className="flex-1 min-w-0">
                                 <div className="flex items-center justify-between mb-1">
                                    <div className="flex items-center gap-2">
                                       <p className="font-black text-slate-900 text-lg uppercase truncate">{product?.name}</p>
-                                      <Badge status={pp.isAdopted ? 'ADOPTED' : 'PROPOSED'}>{pp.isAdopted ? '採用推奨' : '提案中'}</Badge>
+                                      <Badge status={adoptionBadgeStatus}>{adoptionBadgeLabel}</Badge>
                                    </div>
                                    {canManageProjects && (
                                       <button
@@ -2844,6 +3347,40 @@ const ProjectManagement = ({
                                       </button>
                                    )}
                                 </div>
+                                <p className="text-[11px] font-black text-slate-400">
+                                  サプライヤー: {product?.supplierName ?? '未設定'}
+                                </p>
+                                {canManageProjects && (
+                                  <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-[1fr_auto]">
+                                    <input
+                                      id={adoptionCodeInputId}
+                                      defaultValue={pp.companyProductCode ?? ''}
+                                      disabled={selectedProject.status !== ProjectStatus.ADOPTED || !pp.isAdopted}
+                                      placeholder="商品コード"
+                                      onBlur={(event) => {
+                                        if (pp.isAdopted && event.currentTarget.value.trim() !== (pp.companyProductCode ?? '')) {
+                                          updateSelectedProjectProductCode(pp.productId, event.currentTarget.value);
+                                        }
+                                      }}
+                                      className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-black text-slate-700 outline-none focus:ring-4 focus:ring-primary/10 disabled:opacity-60"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={handleToggleAdoptionTag}
+                                      disabled={selectedProject.status !== ProjectStatus.ADOPTED}
+                                      className={cn(
+                                        "rounded-2xl px-4 py-2.5 text-xs font-black transition-all",
+                                        selectedProject.status === ProjectStatus.ADOPTED
+                                          ? pp.isAdopted
+                                            ? "bg-primary-light text-primary hover:bg-emerald-100"
+                                            : "bg-primary text-white hover:bg-emerald-700"
+                                          : "bg-slate-100 text-slate-400 cursor-not-allowed",
+                                      )}
+                                    >
+                                      {pp.isAdopted ? '不採用にする' : '採用にする'}
+                                    </button>
+                                  </div>
+                                )}
                                 <div className="grid grid-cols-2 gap-4 mt-3">
                                    {!isSupplierUser && (
                                      <div className="space-y-0.5">
@@ -2897,6 +3434,7 @@ const ProjectManagement = ({
                        {selectedProject.products.filter(pp => pp.allowOrder).length > 0 ? (
                           selectedProject.products.filter(pp => pp.allowOrder).map(pp => {
                             const product = products.find(d => d.id === pp.productId);
+                            const displayImages = getProductDisplayImages(product);
                             const orderRequest = selectedProject.orderRequests?.find(or => or.productId === pp.productId);
                             const canSupplierMarkShipped = Boolean(
                               isSupplierUser &&
@@ -2909,7 +3447,7 @@ const ProjectManagement = ({
                             );
                             return (
                               <div key={pp.productId} className="p-6 bg-white border border-slate-100 rounded-3xl shadow-sm flex flex-col gap-6 md:flex-row md:items-center hover:border-emerald-200 transition-all">
-                                <img src={product?.images[0]} loading="lazy" decoding="async" className="w-20 h-20 rounded-2xl object-cover bg-slate-50 border border-slate-100" alt="" />
+                                <img src={displayImages[0]} loading="lazy" decoding="async" className="w-20 h-20 rounded-2xl object-cover bg-slate-50 border border-slate-100" alt="" />
                                 <div className="flex-1 min-w-0 space-y-3">
                                   <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                                     <div className="min-w-0">
@@ -2919,6 +3457,9 @@ const ProjectManagement = ({
                                       </div>
                                       <p className="mt-1 text-[10px] text-slate-400 font-bold uppercase tracking-widest">
                                         {orderRequest?.id ?? 'ORDER READY'} • {orderRequest?.createdAt ?? pp.adoptionDate ?? '未生成'}
+                                      </p>
+                                      <p className="mt-1 text-[11px] font-black text-slate-400">
+                                        サプライヤー: {product?.supplierName ?? '未設定'}
                                       </p>
                                     </div>
                                     <Badge status={orderRequest?.status ?? OrderStatus.REQUESTED}>{orderStatusMap[orderRequest?.status ?? OrderStatus.REQUESTED]}</Badge>
@@ -2950,7 +3491,7 @@ const ProjectManagement = ({
                                     </div>
                                   </div>
                                   {(canSupplierMarkShipped || canManagerMarkReceived) && orderRequest && (
-                                    <div className="flex justify-end">
+                                    <div className="flex flex-wrap justify-end gap-2">
                                       {canSupplierMarkShipped && (
                                         <button
                                           type="button"
@@ -3026,7 +3567,7 @@ const ProjectManagement = ({
                   onClick={() => {
                     const title = (document.getElementById('edit-project-title') as HTMLInputElement).value;
                     const client = (document.getElementById('edit-project-client') as HTMLInputElement).value;
-                    handleUpdateProject({ ...selectedProject, title, clientName: client, updatedAt: new Date().toISOString().split('T')[0] });
+                    stageProjectUpdate({ ...selectedProject, title, clientName: client, updatedAt: new Date().toISOString().split('T')[0] });
                   }}
                   className="flex-1 py-4 bg-primary text-white rounded-2xl font-black shadow-xl shadow-primary/10"
                 >
@@ -3074,6 +3615,7 @@ const ProjectManagement = ({
                  p.categoryName.toLowerCase().includes(searchQuery.toLowerCase())
                ).map(p => {
                  const isAlreadyAdded = selectedProject.products.some(pp => pp.productId === p.id);
+                 const displayImages = getProductDisplayImages(p);
                  return (
                    <div
                      key={p.id}
@@ -3084,7 +3626,7 @@ const ProjectManagement = ({
                      )}
                    >
                      <div className="relative aspect-video overflow-hidden">
-                        <img src={p.images[0]} loading="lazy" decoding="async" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
+                        <img src={displayImages[0]} loading="lazy" decoding="async" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
                         <div className="absolute top-4 left-4">
                            <span className="bg-white/90 backdrop-blur-md text-[10px] font-black text-slate-900 px-3 py-1.5 rounded-full shadow-sm uppercase tracking-wider">
                               {p.categoryName}
@@ -3190,7 +3732,7 @@ const ProjectManagement = ({
                  const totalRevenue = updatedProducts.reduce((acc, p) => acc + (p.sellingPrice * p.quantity), 0);
                  const totalProfit = updatedProducts.reduce((acc, p) => acc + ((p.sellingPrice - p.cost) * p.quantity), 0);
 
-                 handleUpdateProject({
+                 stageProjectUpdate({
                     ...selectedProject,
                     products: updatedProducts,
                     orderRequests: [...(selectedProject.orderRequests || []), newOrderRequest],
@@ -3649,6 +4191,9 @@ const DashboardCockpit = ({
   const [toDateFilter, setToDateFilter] = useState('');
   const [clientFilter, setClientFilter] = useState('ALL');
   const [supplierFilter, setSupplierFilter] = useState('ALL');
+  const [adoptionProjectFilter, setAdoptionProjectFilter] = useState('ALL');
+  const [adoptionProductFilter, setAdoptionProductFilter] = useState('ALL');
+  const [hoveredFunnelStage, setHoveredFunnelStage] = useState<string | null>(null);
   const todayValue = useMemo(() => formatDateInputValue(new Date()), []);
 
   const productById = useMemo(
@@ -3712,25 +4257,6 @@ const DashboardCockpit = ({
     return `¥${value.toLocaleString()}`;
   };
 
-  const trendData = useMemo(() => {
-    const end = toDateFilter ? parseDateInputValue(toDateFilter) ?? new Date() : new Date();
-    const months = Array.from({ length: 6 }, (_, index) => {
-      const month = new Date(end.getFullYear(), end.getMonth() - (5 - index), 1);
-      const key = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, '0')}`;
-      return { key, name: month.toLocaleDateString('ja-JP', { month: 'short' }), 売上: 0, 粗利: 0 };
-    });
-    const monthMap = new Map(months.map((month) => [month.key, month]));
-    filteredProjects.forEach((project) => {
-      const date = parseDateInputValue(project.updatedAt) ?? parseDateInputValue(project.createdAt);
-      if (!date) return;
-      const bucket = monthMap.get(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`);
-      if (!bucket) return;
-      bucket.売上 += project.totalRevenue;
-      bucket.粗利 += project.totalProfit;
-    });
-    return months;
-  }, [filteredProjects, toDateFilter]);
-
   const funnelData = useMemo(() => {
     const orders = metrics.orderRequests;
     return [
@@ -3765,6 +4291,33 @@ const DashboardCockpit = ({
     return Array.from(supplierMap.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
   }, [filteredProjects, productById]);
 
+  const adoptionStats = useMemo(() => {
+    const scopedItems = filteredProjects
+      .filter((project) => adoptionProjectFilter === 'ALL' || project.id === adoptionProjectFilter)
+      .flatMap((project) => project.products.map((projectProduct) => ({ project, projectProduct })))
+      .filter(({ projectProduct }) => adoptionProductFilter === 'ALL' || projectProduct.productId === adoptionProductFilter);
+    const adopted = scopedItems.filter(({ projectProduct }) => projectProduct.isAdopted).length;
+    const total = scopedItems.length;
+    const projectRows = filteredProjects.map((project) => {
+      const items = project.products.filter((projectProduct) => adoptionProductFilter === 'ALL' || projectProduct.productId === adoptionProductFilter);
+      const adoptedCount = items.filter((projectProduct) => projectProduct.isAdopted).length;
+      return {
+        id: project.id,
+        name: project.title,
+        total: items.length,
+        adopted: adoptedCount,
+        rate: items.length ? Math.round((adoptedCount / items.length) * 100) : 0,
+      };
+    }).filter((row) => row.total > 0).sort((a, b) => b.rate - a.rate).slice(0, 5);
+    return {
+      total,
+      adopted,
+      pending: Math.max(total - adopted, 0),
+      rate: total ? Math.round((adopted / total) * 100) : 0,
+      rows: projectRows,
+    };
+  }, [adoptionProductFilter, adoptionProjectFilter, filteredProjects]);
+
   const categoryMix = useMemo(() => {
     const categoryMap = new Map<string, { name: string; value: number }>();
     filteredProjects.forEach((project) => {
@@ -3787,6 +4340,18 @@ const DashboardCockpit = ({
     return Array.from(categoryMap.values()).sort((a, b) => b.value - a.value).slice(0, 5);
   }, [filteredProjects, productById, products, supplierFilter]);
 
+  const dashboardProjectOptions = useMemo(
+    () => filteredProjects.map((project) => ({ id: project.id, name: project.title })),
+    [filteredProjects],
+  );
+  const dashboardProductOptions = useMemo(() => {
+    const ids = new Set(filteredProjects.flatMap((project) => project.products.map((projectProduct) => projectProduct.productId)));
+    return products
+      .filter((product) => ids.has(product.id))
+      .map((product) => ({ id: product.id, name: product.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [filteredProjects, products]);
+
   const actionItems = useMemo(() => [
     { label: '承認待ち商品', value: metrics.pendingApprovals, tone: 'red', icon: AlertCircle, to: '/approvals' },
     { label: '発注依頼済み', value: metrics.orderRequests.filter((order) => order.status === OrderStatus.REQUESTED).length, tone: 'green', icon: ShoppingCart, to: '/projects' },
@@ -3801,6 +4366,10 @@ const DashboardCockpit = ({
   );
 
   const funnelTotal = useMemo(() => Math.max(funnelData.reduce((sum, item) => sum + item.value, 0), 1), [funnelData]);
+  const activeFunnelStage = useMemo(
+    () => funnelData.find((stage) => stage.label === hoveredFunnelStage) ?? null,
+    [funnelData, hoveredFunnelStage],
+  );
   const actionChartData = useMemo(() => {
     const colorByTone: Record<string, string> = {
       red: '#EF4444',
@@ -3834,12 +4403,12 @@ const DashboardCockpit = ({
   };
 
   return (
-    <div className="flex h-[calc(100vh-6.5rem)] min-h-0 flex-col gap-3 overflow-hidden animate-in fade-in duration-500">
-      <div className="flex shrink-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+    <div className="flex h-[calc(100vh-5.5rem)] min-h-[640px] flex-col gap-2 overflow-hidden animate-in fade-in duration-500">
+      <div className="flex shrink-0 flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0">
           <p className="text-[10px] font-black uppercase tracking-[0.22em] text-primary">Executive BI Cockpit</p>
-          <h1 className="truncate text-2xl font-black text-slate-900">おかえりなさい、管理者様</h1>
-          <p className="truncate text-xs font-bold text-slate-500">案件・採用・発注・納品の全体状況を1画面で確認できます。</p>
+          <h1 className="truncate text-xl font-black text-slate-900 xl:text-2xl">おかえりなさい、管理者様</h1>
+          <p className="hidden truncate text-xs font-bold text-slate-500 sm:block">案件・採用・発注・納品の全体状況を1画面で確認できます。</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {[
@@ -3853,19 +4422,19 @@ const DashboardCockpit = ({
               key={preset.value}
               type="button"
               onClick={() => applyRangePreset(preset.value as 'ALL' | 'TODAY' | 'WEEK' | 'MONTH' | 'QUARTER')}
-              className="rounded-full border border-slate-100 bg-white px-3 py-2 text-[11px] font-black text-slate-500 shadow-sm transition-colors hover:border-primary/20 hover:bg-primary-light hover:text-primary"
+              className="rounded-full border border-slate-100 bg-white px-3 py-1.5 text-[10px] font-black text-slate-500 shadow-sm transition-colors hover:border-primary/20 hover:bg-primary-light hover:text-primary"
             >
               {preset.label}
             </button>
           ))}
-          <button className="rounded-2xl bg-slate-900 px-4 py-2 text-xs font-black text-white shadow-sm transition-all hover:bg-slate-800">
-            <Download size={15} className="mr-2 inline" />
+          <button className="rounded-2xl bg-slate-900 px-4 py-1.5 text-xs font-black text-white shadow-sm transition-all hover:bg-slate-800">
+            <Download size={14} className="mr-2 inline" />
             エクスポート
           </button>
         </div>
       </div>
 
-      <div className="grid shrink-0 grid-cols-1 gap-2 rounded-[28px] border border-slate-100 bg-white/90 p-3 shadow-sm backdrop-blur md:grid-cols-4">
+      <div className="grid shrink-0 grid-cols-1 gap-2 rounded-[24px] border border-slate-100 bg-white/90 p-2 shadow-sm backdrop-blur md:grid-cols-4">
         <JapaneseDatePicker value={fromDateFilter} onChange={(value) => {
           setFromDateFilter(value);
           if (value && toDateFilter && toDateFilter < value) setToDateFilter(value);
@@ -3873,14 +4442,14 @@ const DashboardCockpit = ({
         <JapaneseDatePicker value={toDateFilter} onChange={setToDateFilter} placeholder="終了日" min={fromDateFilter || undefined} />
         <label className="relative">
           <Users className="absolute left-4 top-1/2 -translate-y-1/2 text-primary" size={16} />
-          <select value={clientFilter} onChange={(event) => setClientFilter(event.target.value)} className="h-12 w-full appearance-none rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm font-black text-slate-600 outline-none transition-all focus:ring-4 focus:ring-primary/10">
+          <select value={clientFilter} onChange={(event) => setClientFilter(event.target.value)} className="h-11 w-full appearance-none rounded-2xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 text-xs font-black text-slate-600 outline-none transition-all focus:ring-4 focus:ring-primary/10 xl:text-sm">
             <option value="ALL">すべてのクライアント</option>
             {dashboardClients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
           </select>
         </label>
         <label className="relative">
           <ShoppingCart className="absolute left-4 top-1/2 -translate-y-1/2 text-primary" size={16} />
-          <select value={supplierFilter} onChange={(event) => setSupplierFilter(event.target.value)} className="h-12 w-full appearance-none rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm font-black text-slate-600 outline-none transition-all focus:ring-4 focus:ring-primary/10">
+          <select value={supplierFilter} onChange={(event) => setSupplierFilter(event.target.value)} className="h-11 w-full appearance-none rounded-2xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 text-xs font-black text-slate-600 outline-none transition-all focus:ring-4 focus:ring-primary/10 xl:text-sm">
             <option value="ALL">すべてのサプライヤー</option>
             {suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
           </select>
@@ -3895,62 +4464,97 @@ const DashboardCockpit = ({
           { label: '粗利見込', value: formatCurrency(metrics.totalProfit), sub: metrics.totalProfit < 0 ? '赤字注意' : '利益確保', icon: Calculator, tone: metrics.totalProfit < 0 ? 'red' : 'green' },
           { label: '要対応', value: actionItems.reduce((sum, item) => sum + item.value, 0).toLocaleString(), sub: '未処理アクション', icon: Bell, tone: 'red' },
         ].map((metric) => (
-          <div key={metric.label} className="min-h-20 rounded-[24px] border border-slate-100 bg-white p-3 shadow-sm">
+          <div key={metric.label} className="min-h-[74px] rounded-[22px] border border-slate-100 bg-white p-2.5 shadow-sm xl:min-h-20 xl:p-3">
             <div className="flex items-center justify-between gap-3">
               <div className={cn(
-                "grid h-10 w-10 shrink-0 place-items-center rounded-2xl",
+                "grid h-8 w-8 shrink-0 place-items-center rounded-xl xl:h-10 xl:w-10 xl:rounded-2xl",
                 metric.tone === 'red' ? "bg-red-50 text-red-500" : metric.tone === 'amber' ? "bg-amber-50 text-amber-600" : "bg-primary-light text-primary",
               )}>
-                <metric.icon size={19} />
+                <metric.icon size={17} />
               </div>
               <span className="rounded-full bg-slate-50 px-2 py-1 text-[10px] font-black text-slate-400">LIVE</span>
             </div>
-            <p className="mt-2 text-[11px] font-black text-slate-400">{metric.label}</p>
+            <p className="mt-1.5 text-[10px] font-black text-slate-400 xl:text-[11px]">{metric.label}</p>
             <div className="mt-1 flex items-end justify-between gap-2">
-              <p className="truncate text-xl font-black text-slate-900">{metric.value}</p>
+              <p className="truncate text-lg font-black text-slate-900 xl:text-xl">{metric.value}</p>
               <p className="truncate text-[10px] font-bold text-slate-400">{metric.sub}</p>
             </div>
           </div>
         ))}
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-12 grid-rows-[minmax(0,1.08fr)_minmax(0,0.92fr)] gap-3">
-        <div className="col-span-12 flex min-h-0 flex-col overflow-hidden rounded-[30px] border border-slate-100 bg-white p-4 shadow-sm xl:col-span-5">
-          <div className="mb-3 flex items-center justify-between">
+      <div className="grid min-h-0 flex-1 grid-cols-12 grid-rows-[minmax(0,1.02fr)_minmax(0,0.78fr)] gap-2 xl:gap-3">
+        <div className="col-span-12 flex min-h-0 flex-col overflow-hidden rounded-[26px] border border-slate-100 bg-white p-3 shadow-sm xl:col-span-5">
+          <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
             <div>
-              <h2 className="text-sm font-black text-slate-900">売上・粗利トレンド</h2>
-              <p className="text-[10px] font-bold text-slate-400">直近6か月の推移</p>
+              <h2 className="text-sm font-black text-slate-900">採用率分析</h2>
+              <p className="text-[10px] font-bold text-slate-400">商品・案件単位で採用状況を確認</p>
             </div>
-            <div className="flex gap-3 text-[10px] font-black text-slate-400">
-              <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-primary" />売上</span>
-              <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-amber-400" />粗利</span>
+            <div className="grid min-w-[240px] grid-cols-2 gap-2">
+              <select
+                value={adoptionProjectFilter}
+                onChange={(event) => setAdoptionProjectFilter(event.target.value)}
+                className="rounded-2xl border border-slate-100 bg-slate-50 px-3 py-1.5 text-[10px] font-black text-slate-600 outline-none xl:text-[11px]"
+              >
+                <option value="ALL">全案件</option>
+                {dashboardProjectOptions.map((project) => (
+                  <option key={project.id} value={project.id}>{project.name}</option>
+                ))}
+              </select>
+              <select
+                value={adoptionProductFilter}
+                onChange={(event) => setAdoptionProductFilter(event.target.value)}
+                className="rounded-2xl border border-slate-100 bg-slate-50 px-3 py-1.5 text-[10px] font-black text-slate-600 outline-none xl:text-[11px]"
+              >
+                <option value="ALL">全商品</option>
+                {dashboardProductOptions.map((product) => (
+                  <option key={product.id} value={product.id}>{product.name}</option>
+                ))}
+              </select>
             </div>
           </div>
-          <div className="min-h-0 flex-1">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-              <AreaChart data={trendData} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="revenueGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#00A36C" stopOpacity={0.24}/>
-                    <stop offset="95%" stopColor="#00A36C" stopOpacity={0}/>
-                  </linearGradient>
-                  <linearGradient id="profitGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#F59E0B" stopOpacity={0.22}/>
-                    <stop offset="95%" stopColor="#F59E0B" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94A3B8', fontSize: 11, fontWeight: 700 }} />
-                <YAxis axisLine={false} tickLine={false} tickFormatter={(value) => formatCurrency(Number(value))} tick={{ fill: '#94A3B8', fontSize: 10, fontWeight: 700 }} />
-                <Tooltip formatter={(value) => formatCurrency(Number(value))} contentStyle={{ borderRadius: 16, border: '1px solid #E2E8F0', fontWeight: 800 }} />
-                <Area type="monotone" dataKey="売上" stroke="#00A36C" strokeWidth={3} fill="url(#revenueGradient)" />
-                <Area type="monotone" dataKey="粗利" stroke="#F59E0B" strokeWidth={2} fill="url(#profitGradient)" />
-              </AreaChart>
-            </ResponsiveContainer>
+          <div className="grid min-h-0 flex-1 grid-cols-[128px_1fr] gap-3 xl:grid-cols-[150px_1fr]">
+            <div className="flex min-h-0 flex-col items-center justify-center rounded-[22px] bg-primary-light/60">
+              <div className="h-24 w-24 xl:h-28 xl:w-28">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={[
+                      { name: '採用', value: adoptionStats.adopted, color: '#00A36C' },
+                      { name: '未採用', value: adoptionStats.pending || (adoptionStats.total ? 0 : 1), color: '#E2E8F0' },
+                    ]} dataKey="value" innerRadius={38} outerRadius={52} paddingAngle={2}>
+                      {[0, 1].map((index) => (
+                        <Cell key={index} fill={index === 0 ? '#00A36C' : '#E2E8F0'} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <p className="text-2xl font-black text-slate-900 xl:text-3xl">{adoptionStats.rate}%</p>
+              <p className="text-[10px] font-black text-slate-400">採用 {adoptionStats.adopted} / 全体 {adoptionStats.total}</p>
+            </div>
+            <div className="min-h-0 space-y-2 overflow-hidden">
+              {adoptionStats.rows.length ? adoptionStats.rows.map((row) => (
+                <div key={row.id} className="rounded-2xl border border-slate-50 bg-slate-50/70 p-2 xl:p-3">
+                  <div className="mb-1 flex items-center justify-between gap-3 text-[11px] font-black">
+                    <span className="truncate text-slate-700">{row.name}</span>
+                    <span className="text-primary">{row.rate}%</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-white">
+                    <div className="h-full rounded-full bg-primary" style={{ width: `${Math.max(row.rate, row.rate ? 8 : 0)}%` }} />
+                  </div>
+                  <p className="mt-1 text-[10px] font-bold text-slate-400">採用 {row.adopted} / 商品 {row.total}</p>
+                </div>
+              )) : (
+                <div className="grid h-full place-items-center rounded-[26px] border border-dashed border-slate-200 text-xs font-black text-slate-300">
+                  対象データがありません
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="col-span-12 flex min-h-0 flex-col overflow-hidden rounded-[30px] border border-slate-100 bg-white p-3 shadow-sm xl:col-span-4">
+        <div className="col-span-12 flex min-h-0 flex-col overflow-hidden rounded-[26px] border border-slate-100 bg-white p-3 shadow-sm xl:col-span-4">
           <div className="mb-2 flex items-center justify-between">
             <div>
               <h2 className="text-sm font-black text-slate-900">案件ファネル</h2>
@@ -3959,8 +4563,8 @@ const DashboardCockpit = ({
             <Badge status={ProjectStatus.ADOPTED}>{metrics.winRate}%</Badge>
           </div>
           <div className="flex min-h-0 flex-1 flex-col justify-center gap-3">
-            <div className="overflow-hidden rounded-[24px] border border-slate-100 bg-slate-50 p-3">
-              <div className="flex h-12 overflow-hidden rounded-2xl bg-white">
+            <div className="overflow-hidden rounded-[22px] border border-slate-100 bg-slate-50 p-2.5">
+              <div className="flex h-10 overflow-hidden rounded-2xl bg-white xl:h-12">
                 {funnelData.map((stage, index) => {
                   const width = Math.max(8, Math.round((stage.value / funnelTotal) * 100));
                   return (
@@ -3972,6 +4576,10 @@ const DashboardCockpit = ({
                         "relative flex min-w-8 items-center justify-center border-r border-white/70 last:border-r-0",
                         index < 2 ? "bg-amber-300" : index < 4 ? "bg-primary" : "bg-emerald-300",
                       )}
+                      onMouseEnter={() => setHoveredFunnelStage(stage.label)}
+                      onMouseLeave={() => setHoveredFunnelStage(null)}
+                      onFocus={() => setHoveredFunnelStage(stage.label)}
+                      onBlur={() => setHoveredFunnelStage(null)}
                       title={`${stage.label}: ${stage.value}`}
                     >
                       <stage.icon size={15} className="text-white drop-shadow-sm" />
@@ -3985,9 +4593,28 @@ const DashboardCockpit = ({
                 <span>DELIVERY</span>
               </div>
             </div>
+            <div className="rounded-[18px] border border-primary/10 bg-primary-light/60 px-3 py-2">
+              {activeFunnelStage ? (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-[11px] font-black text-primary">{activeFunnelStage.label}</p>
+                    <p className="text-[10px] font-bold text-slate-500">
+                      全体 {funnelTotal} 件中 {activeFunnelStage.value} 件
+                    </p>
+                  </div>
+                  <p className="shrink-0 text-lg font-black text-slate-900">
+                    {Math.round((activeFunnelStage.value / funnelTotal) * 100)}%
+                  </p>
+                </div>
+              ) : (
+                <p className="text-[10px] font-bold text-slate-500">
+                  バーにカーソルを合わせると各ステージの件数と比率を確認できます。
+                </p>
+              )}
+            </div>
             <div className="grid grid-cols-3 gap-1.5">
               {funnelData.map((stage, index) => (
-                <div key={stage.label} className="min-w-0 rounded-2xl bg-slate-50 px-2 py-1.5">
+                <div key={stage.label} className="min-w-0 rounded-2xl bg-slate-50 px-2 py-1">
                   <div className="flex items-center justify-between gap-1">
                     <span className={cn("h-2 w-2 shrink-0 rounded-full", index < 2 ? "bg-amber-300" : index < 4 ? "bg-primary" : "bg-emerald-300")} />
                     <span className="text-xs font-black text-slate-900">{stage.value}</span>
@@ -4000,48 +4627,44 @@ const DashboardCockpit = ({
         </div>
 
         <div className="col-span-12 min-h-0 xl:col-span-3">
-          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[30px] border border-slate-100 bg-white p-4 shadow-sm">
-            <div className="mb-2 flex items-center justify-between">
+          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[26px] border border-slate-100 bg-white p-3 shadow-sm">
+            <div className="mb-1.5 flex items-center justify-between">
               <h2 className="text-sm font-black text-slate-900">要対応</h2>
               <Bell size={16} className="text-primary" />
             </div>
-            <div className="grid min-h-0 flex-1 grid-cols-1 content-center gap-4">
-              <div className="relative mx-auto flex h-[118px] w-[118px] items-center justify-center">
-                <ResponsiveContainer width={118} height={118} minWidth={0} minHeight={0}>
-                  <PieChart margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
-                    <Pie
-                      data={actionChartData}
-                      dataKey="value"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={38}
-                      outerRadius={54}
-                      paddingAngle={3}
-                      stroke="none"
-                    >
-                      {actionChartData.map((entry, index) => <Cell key={`action-${index}`} fill={entry.color} />)}
-                    </Pie>
-                  </PieChart>
-                </ResponsiveContainer>
-                <span className="absolute text-2xl font-black text-slate-900">{actionTotal}</span>
+            <div className="flex min-h-0 flex-1 flex-col justify-center gap-1.5">
+              <div className="rounded-[18px] bg-slate-50 p-2 text-center">
+                <p className="text-[10px] font-black text-slate-400">未処理アクション</p>
+                <p className="text-2xl font-black leading-tight text-slate-900">{actionTotal}</p>
               </div>
-              <div className="grid min-h-0 grid-rows-5 gap-1">
-                {actionItems.map((item) => (
-                  <Link key={item.label} to={item.to} className="flex min-h-0 items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-1.5 transition-colors hover:bg-primary-light">
-                    <span className="flex min-w-0 items-center gap-2 text-[10px] font-black text-slate-600">
-                      <span className={cn("h-2 w-2 shrink-0 rounded-full", item.tone === 'red' ? "bg-red-500" : item.tone === 'amber' ? "bg-amber-400" : "bg-primary")} />
-                      <span className="truncate">{item.label}</span>
-                    </span>
-                    <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-black text-slate-900">{item.value}</span>
-                  </Link>
-                ))}
+              <div className="grid min-h-0 gap-1">
+                {actionItems.map((item) => {
+                  const width = actionTotal ? Math.max(item.value ? 8 : 0, Math.round((item.value / actionTotal) * 100)) : 0;
+                  return (
+                    <Link key={item.label} to={item.to} className="group min-w-0 rounded-xl bg-slate-50 px-2 py-1 transition-colors hover:bg-primary-light">
+                      <div className="mb-0.5 flex items-center justify-between gap-2">
+                        <span className="flex min-w-0 items-center gap-1.5 text-[9px] font-black text-slate-600 xl:text-[10px]">
+                          <span className={cn("h-2 w-2 shrink-0 rounded-full", item.tone === 'red' ? "bg-red-500" : item.tone === 'amber' ? "bg-amber-400" : "bg-primary")} />
+                          <span className="truncate">{item.label}</span>
+                        </span>
+                        <span className="shrink-0 text-[10px] font-black text-slate-900">{item.value}</span>
+                      </div>
+                      <div className="h-1 overflow-hidden rounded-full bg-white">
+                        <div
+                          className={cn("h-full rounded-full transition-all", item.tone === 'red' ? "bg-red-500" : item.tone === 'amber' ? "bg-amber-400" : "bg-primary")}
+                          style={{ width: `${width}%` }}
+                        />
+                      </div>
+                    </Link>
+                  );
+                })}
               </div>
             </div>
           </div>
         </div>
 
-        <div className="col-span-12 row-start-2 grid min-h-0 grid-cols-12 gap-3">
-          <div className="col-span-12 min-h-0 overflow-hidden rounded-[30px] border border-slate-100 bg-white p-3 shadow-sm lg:col-span-4">
+        <div className="col-span-12 row-start-2 grid min-h-0 grid-cols-12 gap-2 xl:gap-3">
+          <div className="col-span-12 min-h-0 overflow-hidden rounded-[26px] border border-slate-100 bg-white p-3 shadow-sm lg:col-span-4">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-sm font-black text-slate-900">サプライヤー売上 Top</h2>
               <Link to="/suppliers" className="text-[10px] font-black text-primary">詳細</Link>
@@ -4069,7 +4692,7 @@ const DashboardCockpit = ({
             </div>
           </div>
 
-          <div className="col-span-12 min-h-0 overflow-hidden rounded-[30px] border border-slate-100 bg-white p-3 shadow-sm lg:col-span-3">
+          <div className="col-span-12 min-h-0 overflow-hidden rounded-[26px] border border-slate-100 bg-white p-3 shadow-sm lg:col-span-3">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-sm font-black text-slate-900">カテゴリ構成</h2>
               <Package size={16} className="text-primary" />
@@ -4092,7 +4715,7 @@ const DashboardCockpit = ({
             </div>
           </div>
 
-          <div className="col-span-12 min-h-0 overflow-hidden rounded-[30px] border border-slate-100 bg-white shadow-sm lg:col-span-5">
+          <div className="col-span-12 min-h-0 overflow-hidden rounded-[26px] border border-slate-100 bg-white shadow-sm lg:col-span-5">
             <div className="flex items-center justify-between border-b border-slate-50 px-4 py-2.5">
               <h2 className="text-sm font-black text-slate-900">進行中案件</h2>
               <Link to="/projects" className="text-[10px] font-black text-primary">すべて見る</Link>
@@ -4159,6 +4782,13 @@ const ApprovalList = ({ products, onApprove, onReject }: {
       return matchesSearch && matchesCategory && matchesSupplier;
     });
   }, [categoryFilter, pendingProductsBase, searchQuery, supplierFilter]);
+  const {
+    page: approvalPage,
+    setPage: setApprovalPage,
+    totalPages: approvalTotalPages,
+    pagedItems: pagedPendingProducts,
+    total: approvalTotal,
+  } = usePagination(pendingProducts, 6);
 
   return (
     <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">
@@ -4207,8 +4837,9 @@ const ApprovalList = ({ products, onApprove, onReject }: {
       </div>
 
       {pendingProducts.length > 0 ? (
+        <>
         <div className="grid grid-cols-1 gap-6">
-          {pendingProducts.map(p => {
+          {pagedPendingProducts.map(p => {
             const currentVersion = p.versions?.[p.versions.length - 1]; // The latest one waiting for approval
             const previousVersion = p.versions?.[p.versions.length - 2];
             const pendingChange = p.pendingChange;
@@ -4375,6 +5006,8 @@ const ApprovalList = ({ products, onApprove, onReject }: {
             );
           })}
         </div>
+        <PaginationControls page={approvalPage} totalPages={approvalTotalPages} total={approvalTotal} pageSize={6} onPageChange={setApprovalPage} />
+        </>
       ) : (
         <div className="py-32 bg-white rounded-[40px] border border-slate-100 flex flex-col items-center justify-center text-center space-y-6">
            <div className="w-24 h-24 bg-primary-light rounded-[32px] flex items-center justify-center">
@@ -4444,6 +5077,13 @@ const UserManagement = ({
       return matchesSearch && matchesRole && !user.deleted;
     });
   }, [roleFilter, searchQuery, users]);
+  const {
+    page: userPage,
+    setPage: setUserPage,
+    totalPages: userTotalPages,
+    pagedItems: pagedUsers,
+    total: userTotal,
+  } = usePagination(filteredUsers);
 
   const openCreate = () => {
     setEditingUser(null);
@@ -4523,7 +5163,7 @@ const UserManagement = ({
           <span className="text-right">操作</span>
         </div>
         <div className="divide-y divide-slate-50">
-          {filteredUsers.map((user) => (
+          {pagedUsers.map((user) => (
             <div key={user.id} className="grid grid-cols-[1.2fr_1fr_160px_1fr_120px] gap-4 px-6 py-5 items-center">
               <div>
                 <p className="font-black text-slate-900">{user.name}</p>
@@ -4544,6 +5184,7 @@ const UserManagement = ({
           ))}
         </div>
       </div>
+      <PaginationControls page={userPage} totalPages={userTotalPages} total={userTotal} onPageChange={setUserPage} />
 
       {isModalOpen && (
         <ModalPortal>
@@ -4615,6 +5256,7 @@ const MainLayout = ({
   notificationCount = 0,
   notifications = [],
   onNotificationClick,
+  onNotify,
 }: {
   children: React.ReactNode,
   user: User,
@@ -4622,11 +5264,57 @@ const MainLayout = ({
   notificationCount?: number,
   notifications?: Notification[],
   onNotificationClick?: (notification: Notification) => void,
+  onNotify?: (toast: Omit<ToastMessage, 'id'>) => void,
 }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const notificationMenuRef = useRef<HTMLDivElement | null>(null);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!isNotificationOpen && !isUserMenuOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (isNotificationOpen && !notificationMenuRef.current?.contains(target)) {
+        setIsNotificationOpen(false);
+      }
+      if (isUserMenuOpen && !userMenuRef.current?.contains(target)) {
+        setIsUserMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [isNotificationOpen, isUserMenuOpen]);
+
+  const handleChangePasswordSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setPasswordError('');
+    const formData = new FormData(event.currentTarget);
+    const currentPassword = String(formData.get('currentPassword') ?? '');
+    const newPassword = String(formData.get('newPassword') ?? '');
+    const confirmPassword = String(formData.get('confirmPassword') ?? '');
+    if (newPassword !== confirmPassword) {
+      setPasswordError('新しいパスワードが一致しません。');
+      return;
+    }
+    setIsChangingPassword(true);
+    try {
+      await api.changePassword({ currentPassword, newPassword });
+      setIsPasswordModalOpen(false);
+      onNotify?.({ tone: 'success', title: 'パスワードを変更しました' });
+    } catch (error) {
+      setPasswordError(error instanceof Error ? error.message : 'パスワード変更に失敗しました。');
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
 
   const menuSections = user.role === UserRole.SUPPLIER
     ? [{
@@ -4679,11 +5367,12 @@ const MainLayout = ({
         className="sticky top-0 h-screen bg-white border-r border-slate-100 flex-shrink-0 z-30 overflow-hidden will-change-[width]"
       >
         <div className={cn("h-full flex flex-col transition-[padding] duration-200", isSidebarOpen ? "p-8" : "px-4 py-6")}>
-          <div className={cn("mb-10 flex", isSidebarOpen ? "items-start justify-between" : "flex-col items-center gap-4")}>
-            <div className={cn("flex min-w-0", isSidebarOpen ? "w-full flex-col items-center gap-3" : "items-center justify-center")}>
-              <img src={logoIconSrc} alt="提案一元管理" className={cn("object-contain shrink-0", isSidebarOpen ? "w-28 h-28" : "w-12 h-12")} />
-              {isSidebarOpen && <p className="text-xl font-bold text-slate-900 tracking-tight leading-tight text-center">提案一元管理</p>}
-            </div>
+          <div className={cn("mb-10 flex", isSidebarOpen ? "items-center justify-between gap-3" : "flex-col items-center gap-4")}>
+            {isSidebarOpen ? (
+              <BrandLogo />
+            ) : (
+              <BrandMark className="h-12 w-12 rounded-2xl" iconClassName="h-7 w-7" />
+            )}
             <button
               onClick={() => setIsSidebarOpen((open) => !open)}
               className="text-slate-300 hover:text-slate-600 transition-colors"
@@ -4744,10 +5433,13 @@ const MainLayout = ({
               >
                 <HelpCircle size={20} />
               </button>
-              <div className="relative">
+              <div ref={notificationMenuRef} className="relative">
                 <button
                   type="button"
-                  onClick={() => setIsNotificationOpen((open) => !open)}
+                  onClick={() => {
+                    setIsUserMenuOpen(false);
+                    setIsNotificationOpen((open) => !open);
+                  }}
                   className="p-2 text-slate-400 hover:text-primary transition-colors relative"
                   aria-label="通知"
                 >
@@ -4806,19 +5498,56 @@ const MainLayout = ({
 
             <div className="w-px h-8 bg-slate-100" />
 
-            <button className="flex items-center gap-3 group">
-               <div className="relative">
-                 <div className="w-10 h-10 rounded-xl bg-slate-100 border-2 border-white shadow-sm overflow-hidden group-hover:ring-2 ring-primary transition-all">
-                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="" />
+            <div ref={userMenuRef} className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsNotificationOpen(false);
+                  setIsUserMenuOpen((open) => !open);
+                }}
+                className="flex items-center gap-3 group"
+              >
+                 <div className="relative">
+                   <div className="w-10 h-10 rounded-xl bg-slate-100 border-2 border-white shadow-sm overflow-hidden group-hover:ring-2 ring-primary transition-all">
+                      <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="" />
+                   </div>
+                   <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white" />
                  </div>
-                 <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-emerald-500 rounded-full border-2 border-white" />
-               </div>
-               <div className="text-left hidden 2xl:block">
-                  <p className="text-sm font-bold text-slate-900 leading-none mb-1">{user.name}</p>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{roleLabelMap[user.role]}</p>
-               </div>
-               <ChevronRight size={16} className="text-slate-400 rotate-90" />
-            </button>
+                 <div className="text-left hidden 2xl:block">
+                    <p className="text-sm font-bold text-slate-900 leading-none mb-1">{user.name}</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{roleLabelMap[user.role]}</p>
+                 </div>
+                 <ChevronRight size={16} className={cn("text-slate-400 transition-transform", isUserMenuOpen ? "-rotate-90" : "rotate-90")} />
+              </button>
+              {isUserMenuOpen && (
+                <div className="absolute right-0 top-14 z-[80] w-64 rounded-3xl border border-slate-100 bg-white p-3 shadow-2xl shadow-slate-200/70">
+                  <div className="px-3 py-2">
+                    <p className="text-sm font-black text-slate-900">{user.name}</p>
+                    <p className="mt-1 text-xs font-bold text-slate-400">{user.email}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsUserMenuOpen(false);
+                      setPasswordError('');
+                      setIsPasswordModalOpen(true);
+                    }}
+                    className="mt-2 flex w-full items-center justify-between rounded-2xl px-3 py-3 text-left text-sm font-black text-slate-600 transition-colors hover:bg-primary-light hover:text-primary"
+                  >
+                    パスワード変更
+                    <ChevronRight size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onLogout}
+                    className="flex w-full items-center justify-between rounded-2xl px-3 py-3 text-left text-sm font-black text-red-500 transition-colors hover:bg-red-50"
+                  >
+                    ログアウト
+                    <LogOut size={16} />
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
@@ -4826,6 +5555,44 @@ const MainLayout = ({
           {children}
         </div>
       </main>
+      {isPasswordModalOpen && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-900/60 p-6 backdrop-blur-sm">
+            <form onSubmit={handleChangePasswordSubmit} className="w-full max-w-md rounded-[32px] bg-white p-8 shadow-2xl">
+              <div className="mb-6 flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-black text-slate-900">パスワード変更</h3>
+                  <p className="mt-1 text-xs font-bold text-slate-400">現在のパスワードを確認して更新します。</p>
+                </div>
+                <button type="button" onClick={() => setIsPasswordModalOpen(false)} className="rounded-full p-2 text-slate-400 hover:bg-slate-50">
+                  <X size={22} />
+                </button>
+              </div>
+              <div className="space-y-4">
+                <label className="block space-y-1.5">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">現在のパスワード</span>
+                  <input name="currentPassword" type="password" required className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 font-bold outline-none focus:ring-4 focus:ring-primary/10" />
+                </label>
+                <label className="block space-y-1.5">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">新しいパスワード</span>
+                  <input name="newPassword" type="password" minLength={8} required className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 font-bold outline-none focus:ring-4 focus:ring-primary/10" />
+                </label>
+                <label className="block space-y-1.5">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">新しいパスワード（確認）</span>
+                  <input name="confirmPassword" type="password" minLength={8} required className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 font-bold outline-none focus:ring-4 focus:ring-primary/10" />
+                </label>
+                {passwordError && <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm font-bold text-red-600">{passwordError}</div>}
+              </div>
+              <div className="mt-7 flex gap-3">
+                <button type="button" onClick={() => setIsPasswordModalOpen(false)} className="flex-1 py-3 text-sm font-black text-slate-400">キャンセル</button>
+                <button disabled={isChangingPassword} className="flex-1 rounded-2xl bg-primary py-3 text-sm font-black text-white shadow-lg shadow-primary/10 disabled:opacity-60">
+                  {isChangingPassword ? '変更中...' : '変更する'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </ModalPortal>
+      )}
     </div>
   );
 };
@@ -4833,6 +5600,13 @@ const MainLayout = ({
 const SupplierMaster = ({ suppliers, canManage = false, onAdd, onUpdate, onDelete }: { suppliers: Supplier[], canManage?: boolean, onAdd: (s: Supplier) => void, onUpdate: (s: Supplier) => void, onDelete: (id: string) => void }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const {
+    page: supplierPage,
+    setPage: setSupplierPage,
+    totalPages: supplierTotalPages,
+    pagedItems: pagedSuppliers,
+    total: supplierTotal,
+  } = usePagination(suppliers);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -4866,7 +5640,7 @@ const SupplierMaster = ({ suppliers, canManage = false, onAdd, onUpdate, onDelet
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {suppliers.map(s => (
+          {pagedSuppliers.map(s => (
             <div key={s.id} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-xl transition-all space-y-4">
               <div className="flex items-center justify-between">
                 <div className="w-12 h-12 bg-primary-light rounded-2xl flex items-center justify-center font-black text-primary text-xl">{s.name.charAt(0)}</div>
@@ -4892,6 +5666,7 @@ const SupplierMaster = ({ suppliers, canManage = false, onAdd, onUpdate, onDelet
             </div>
           ))}
         </div>
+        <PaginationControls page={supplierPage} totalPages={supplierTotalPages} total={supplierTotal} onPageChange={setSupplierPage} />
       </div>
 
       {isModalOpen && (
@@ -4943,6 +5718,13 @@ const SupplierMaster = ({ suppliers, canManage = false, onAdd, onUpdate, onDelet
 const ClientMaster = ({ clients, canManage = false, onAdd, onUpdate, onDelete }: { clients: Client[], canManage?: boolean, onAdd: (c: Client) => void, onUpdate: (c: Client) => void, onDelete: (id: string) => void }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
+  const {
+    page: clientPage,
+    setPage: setClientPage,
+    totalPages: clientTotalPages,
+    pagedItems: pagedClients,
+    total: clientTotal,
+  } = usePagination(clients);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -4976,7 +5758,7 @@ const ClientMaster = ({ clients, canManage = false, onAdd, onUpdate, onDelete }:
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {clients.map(c => (
+          {pagedClients.map(c => (
             <div key={c.id} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-xl transition-all space-y-4">
               <div className="flex items-center justify-between">
                 <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center font-black text-white text-xl">{c.name.charAt(0)}</div>
@@ -5002,6 +5784,7 @@ const ClientMaster = ({ clients, canManage = false, onAdd, onUpdate, onDelete }:
             </div>
           ))}
         </div>
+        <PaginationControls page={clientPage} totalPages={clientTotalPages} total={clientTotal} onPageChange={setClientPage} />
       </div>
 
       {isModalOpen && (
@@ -5054,10 +5837,16 @@ const LoginPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
   const [email, setEmail] = useState('admin@example.com');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [resetMessage, setResetMessage] = useState('');
+  const [isResetMode, setIsResetMode] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (isResetMode) {
+      await handlePasswordResetRequest();
+      return;
+    }
     setIsSubmitting(true);
     setError('');
     try {
@@ -5070,14 +5859,34 @@ const LoginPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
     }
   };
 
+  const handlePasswordResetRequest = async () => {
+    setError('');
+    setResetMessage('');
+    if (!email) {
+      setError('メールアドレスを入力してください。');
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const response = await api.requestPasswordReset({ email });
+      setResetMessage(`${response.message} ${response.resetLink}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'パスワード再設定の受付に失敗しました。');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#F8FAFB] px-6 py-10">
       <form onSubmit={handleSubmit} className="w-full max-w-xl bg-white rounded-[32px] p-8 shadow-2xl shadow-slate-200/70 border border-slate-100 space-y-7">
-        <div className="space-y-4">
-          <img src={logoTitleSrc} alt="提案一元管理" className="mx-auto h-64 max-w-full object-contain" />
+        <div className="space-y-8">
+          <BrandLogo variant="login" />
           <div>
-            <h1 className="text-2xl font-black text-slate-900">ログイン</h1>
-            <p className="text-sm font-medium text-slate-500 mt-2">アカウント情報を入力してシステムにアクセスしてください。</p>
+            <h1 className="text-2xl font-black text-slate-900">{isResetMode ? 'パスワード再設定' : 'ログイン'}</h1>
+            <p className="text-sm font-medium text-slate-500 mt-2">
+              {isResetMode ? 'メールアドレス宛に再設定リンクを送信します。（デモ）' : 'アカウント情報を入力してシステムにアクセスしてください。'}
+            </p>
           </div>
         </div>
 
@@ -5092,16 +5901,18 @@ const LoginPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
               required
             />
           </label>
-          <label className="block space-y-2">
-            <span className="text-xs font-black text-slate-500 uppercase tracking-widest">パスワード</span>
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-4 focus:ring-primary/10 outline-none font-bold"
-              required
-            />
-          </label>
+          {!isResetMode && (
+            <label className="block space-y-2">
+              <span className="text-xs font-black text-slate-500 uppercase tracking-widest">パスワード</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-4 focus:ring-primary/10 outline-none font-bold"
+                required
+              />
+            </label>
+          )}
         </div>
 
         {error && (
@@ -5109,13 +5920,40 @@ const LoginPage = ({ onLogin }: { onLogin: (user: User) => void }) => {
             {error}
           </div>
         )}
+        {resetMessage && (
+          <div className="px-4 py-3 bg-primary-light text-primary rounded-xl text-sm font-bold break-all">
+            {resetMessage}
+          </div>
+        )}
 
+        {isResetMode ? (
+          <button
+            type="button"
+            onClick={handlePasswordResetRequest}
+            disabled={isSubmitting}
+            className="w-full py-4 bg-primary text-white rounded-2xl font-black shadow-xl shadow-primary/20 disabled:opacity-60"
+          >
+            {isSubmitting ? '送信中...' : '再設定リンクを送信'}
+          </button>
+        ) : (
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="w-full py-4 bg-primary text-white rounded-2xl font-black shadow-xl shadow-primary/20 disabled:opacity-60"
+          >
+            {isSubmitting ? 'ログイン中...' : 'ログイン'}
+          </button>
+        )}
         <button
-          type="submit"
-          disabled={isSubmitting}
-          className="w-full py-4 bg-primary text-white rounded-2xl font-black shadow-xl shadow-primary/20 disabled:opacity-60"
+          type="button"
+          onClick={() => {
+            setIsResetMode((mode) => !mode);
+            setError('');
+            setResetMessage('');
+          }}
+          className="w-full text-center text-sm font-black text-slate-400 hover:text-primary"
         >
-          {isSubmitting ? 'ログイン中...' : 'ログイン'}
+          {isResetMode ? 'ログインに戻る' : 'パスワードをお忘れですか？'}
         </button>
       </form>
     </div>
@@ -5248,7 +6086,7 @@ export default function App() {
     void runMutation(async () => {
       const response = await api.createProduct(newProduct);
       if (imageFiles.length) {
-        await api.uploadProductImages(response.product.id, imageFiles);
+        await api.uploadProductImages(response.product.id, imageFiles, { initial: true });
       }
     }, '商品を登録しました');
   };
@@ -5433,6 +6271,10 @@ export default function App() {
     </div>
   );
 
+  const adoptedProductIds = Array.from(new Set(
+    projects.flatMap((project) => project.products.filter((product) => product.isAdopted).map((product) => product.productId)),
+  ));
+
   return (
     <Router>
       <Routes>
@@ -5447,6 +6289,7 @@ export default function App() {
               notificationCount={unreadNotificationCount}
               notifications={notifications}
               onNotificationClick={handleNotificationClick}
+              onNotify={showToast}
             >
               {appError && (
                 <div className="mb-6 px-4 py-3 bg-red-50 text-red-600 border border-red-100 rounded-2xl text-sm font-bold">
@@ -5505,6 +6348,7 @@ export default function App() {
                     onDelete={handleDeleteProduct}
                     onDeleteImage={handleDeleteProductImage}
                     onNotify={showToast}
+                    adoptedProductIds={adoptedProductIds}
                   />
                 } />
                 <Route path="/approvals" element={
@@ -5520,7 +6364,7 @@ export default function App() {
                 } />
                 <Route path="/exports" element={
                   currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.PRODUCT_MANAGER
-                    ? <ExportData />
+                    ? <ExportData suppliers={suppliers} clients={clients} />
                     : <Navigate to="/" replace />
                 } />
                 <Route path="*" element={<Navigate to="/" replace />} />

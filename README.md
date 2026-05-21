@@ -153,3 +153,18 @@ npm run db:generate
 npm run db:migrate
 npm run db:seed
 ```
+
+## Single EC2 Demo Deployment
+
+This repo includes a Docker Compose deployment kit for running the full demo stack on one AWS EC2 instance:
+
+- `Dockerfile`
+- `docker-compose.prod.yml`
+- `Caddyfile`
+- `.env.prod.example`
+- `scripts/aws-ec2-bootstrap.sh`
+- `scripts/deploy-prod.sh`
+- `scripts/backup-prod.sh`
+
+See [docs/aws-ec2-deploy.md](docs/aws-ec2-deploy.md) for the AWS manual steps and deploy commands.
+For command-line EC2 provisioning, see [docs/aws-cli-provision.md](docs/aws-cli-provision.md).

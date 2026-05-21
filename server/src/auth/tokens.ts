@@ -25,7 +25,7 @@ export function createRefreshToken(user: AppUser, config: AppConfig) {
 }
 
 export function verifyAccessToken(token: string, config: AppConfig): AppUser {
-  const payload = jwt.verify(token, config.jwtAccessSecret) as TokenPayload;
+  const payload = verifyJwtToken(token, config.jwtAccessSecret);
   if (payload.tokenType !== 'access') {
     throw new ApiError(401, 'Invalid access token', 'INVALID_TOKEN');
   }
@@ -33,11 +33,19 @@ export function verifyAccessToken(token: string, config: AppConfig): AppUser {
 }
 
 export function verifyRefreshToken(token: string, config: AppConfig): AppUser {
-  const payload = jwt.verify(token, config.jwtRefreshSecret) as TokenPayload;
+  const payload = verifyJwtToken(token, config.jwtRefreshSecret);
   if (payload.tokenType !== 'refresh') {
     throw new ApiError(401, 'Invalid refresh token', 'INVALID_TOKEN');
   }
   return fromPayload(payload);
+}
+
+function verifyJwtToken(token: string, secret: string): TokenPayload {
+  try {
+    return jwt.verify(token, secret) as TokenPayload;
+  } catch {
+    throw new ApiError(401, 'Invalid or expired token', 'INVALID_TOKEN');
+  }
 }
 
 function toPayload(user: AppUser, tokenType: TokenPayload['tokenType']): TokenPayload {

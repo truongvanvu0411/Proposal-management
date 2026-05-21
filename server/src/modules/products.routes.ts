@@ -14,7 +14,7 @@ import { validateBody } from '../shared/validation';
 
 const manageProductRoles = [UserRole.ADMIN, UserRole.SUPPLIER];
 const imageRoles = [UserRole.ADMIN, UserRole.SUPPLIER];
-const maxImagesPerProduct = 10;
+const maxImagesPerProduct = 3;
 const maxImageBytes = 15 * 1024 * 1024;
 const minImageDimension = 300;
 const maxImageDimension = 8000;
@@ -43,6 +43,8 @@ const productSchema = z.object({
   supplierId: z.string().min(1).optional().or(z.literal('')),
   status: z.nativeEnum(ProductStatus).optional(),
   imageUrl: z.string().url().optional().or(z.literal('')),
+  availableFrom: z.string().date().optional().or(z.literal('')),
+  availableTo: z.string().date().optional().or(z.literal('')),
   remarks: z.string().optional(),
 });
 
@@ -113,6 +115,7 @@ export function createProductsRouter(db: DatabaseClient, config: AppConfig, stor
       const body = req.body as z.infer<typeof productSchema>;
       const supplierId = resolveWritableSupplierId(req, body.supplierId);
       const listPrice = resolveWritableListPrice(req, body.cost, body.listPrice);
+      assertAvailabilityWindow(body.availableFrom, body.availableTo);
       await assertSupplierExists(db, supplierId);
       const category = await upsertCategory(db, body.categoryName);
       const product = await db.product.create({
@@ -131,6 +134,8 @@ export function createProductsRouter(db: DatabaseClient, config: AppConfig, stor
           supplierId,
           status: body.status ?? ProductStatus.ACTIVE,
           imageUrl: body.imageUrl || null,
+          availableFrom: body.availableFrom ? new Date(`${body.availableFrom}T00:00:00.000Z`) : null,
+          availableTo: body.availableTo ? new Date(`${body.availableTo}T00:00:00.000Z`) : null,
           remarks: body.remarks,
           versions: {
             create: {
@@ -179,6 +184,13 @@ export function createProductsRouter(db: DatabaseClient, config: AppConfig, stor
       const supplierId = req.user?.role === UserRole.SUPPLIER ? current.supplierId : body.supplierId || undefined;
       const nextCost = body.cost ?? Number(current.cost);
       const nextListPrice = resolveWritableListPrice(req, nextCost, body.listPrice ?? Number(current.listPrice));
+      const nextAvailableFrom = body.availableFrom === undefined
+        ? (current.availableFrom ? toDateString(current.availableFrom) : '')
+        : body.availableFrom;
+      const nextAvailableTo = body.availableTo === undefined
+        ? (current.availableTo ? toDateString(current.availableTo) : '')
+        : body.availableTo;
+      assertAvailabilityWindow(nextAvailableFrom, nextAvailableTo);
       if (supplierId) {
         await assertSupplierExists(db, supplierId);
       }
@@ -188,6 +200,8 @@ export function createProductsRouter(db: DatabaseClient, config: AppConfig, stor
         supplierId: supplierId ?? current.supplierId,
         cost: nextCost,
         listPrice: nextListPrice,
+        availableFrom: nextAvailableFrom || undefined,
+        availableTo: nextAvailableTo || undefined,
       });
       const changedFields = getChangedProductFields(beforeSnapshot, afterSnapshot);
       if (changedFields.length) {
@@ -262,6 +276,11 @@ export function createProductsRouter(db: DatabaseClient, config: AppConfig, stor
       const pendingAddCount = currentImageChanges.filter((change) => change.type === 'ADD').length;
       const pendingDeleteCount = currentImageChanges.filter((change) => change.type === 'DELETE').length;
       const existingCount = await db.productImage.count({ where: { productId: product.id } });
+      const shouldApplyInitialImages =
+        req.query.initial === 'true' &&
+        existingCount === 0 &&
+        !pendingChange &&
+        product.status === ProductStatus.ACTIVE;
       if (existingCount + pendingAddCount - pendingDeleteCount + files.length > maxImagesPerProduct) {
         throw new ApiError(400, 'This product already has too many images', 'PRODUCT_IMAGE_LIMIT_EXCEEDED');
       }
@@ -290,7 +309,7 @@ export function createProductsRouter(db: DatabaseClient, config: AppConfig, stor
               status: 'READY',
               ownerType: 'PRODUCT',
               ownerId: product.id,
-              purpose: 'PRODUCT_IMAGE_PENDING',
+              purpose: shouldApplyInitialImages ? 'PRODUCT_IMAGE_MASTER' : 'PRODUCT_IMAGE_PENDING',
               uploadedById: req.user?.id,
             },
           });
@@ -320,7 +339,7 @@ export function createProductsRouter(db: DatabaseClient, config: AppConfig, stor
             },
           });
           acceptedChanges.push(imageChange);
-          accepted.push(await toPendingProductImageDto(product.id, savedFile, imageChange.sortOrder, storage, normalized.warnings));
+          accepted.push(await toPendingProductImageDto(product.id, savedFile, imageChange.sortOrder, normalized.warnings));
         } catch (error) {
           if (error instanceof ApiError) {
             rejected.push({
@@ -342,6 +361,29 @@ export function createProductsRouter(db: DatabaseClient, config: AppConfig, stor
           firstRejected?.code ?? 'IMAGE_UPLOAD_FAILED',
           { rejected },
         );
+      }
+
+      if (shouldApplyInitialImages) {
+        await Promise.all(
+          acceptedChanges.map((change: ProductImageChange) =>
+            db.productImage.create({
+              data: {
+                productId: product.id,
+                fileId: change.fileId,
+                sortOrder: change.sortOrder ?? 0,
+              },
+            }),
+          ),
+        );
+        await writeAuditLog(db, {
+          actorId: req.user?.id,
+          action: 'PRODUCT_IMAGE_INITIAL_UPLOAD',
+          entityType: 'Product',
+          entityId: product.id,
+          metadata: { productId: product.id, imageCount: acceptedChanges.length },
+        });
+        res.status(201).json({ images: await getProductImages(db, storage, product.id), rejected });
+        return;
       }
 
       await upsertPendingProductChange(db, product, req, undefined, undefined, acceptedChanges);
@@ -463,6 +505,8 @@ export function createProductsRouter(db: DatabaseClient, config: AppConfig, stor
             supplierId: afterSnapshot.supplierId,
             productType: afterSnapshot.productType,
             description: afterSnapshot.description,
+            availableFrom: afterSnapshot.availableFrom ? new Date(`${afterSnapshot.availableFrom}T00:00:00.000Z`) : null,
+            availableTo: afterSnapshot.availableTo ? new Date(`${afterSnapshot.availableTo}T00:00:00.000Z`) : null,
             remarks: afterSnapshot.remarks,
             status: ProductStatus.ACTIVE,
             versions: {
@@ -614,6 +658,12 @@ function resolveWritableListPrice(req: any, cost: number, requestedListPrice?: n
   return requestedListPrice ?? cost;
 }
 
+function assertAvailabilityWindow(availableFrom?: string, availableTo?: string) {
+  if (availableFrom && availableTo && availableFrom > availableTo) {
+    throw new ApiError(400, 'Product availability start date must be before end date', 'INVALID_PRODUCT_AVAILABILITY');
+  }
+}
+
 async function assertSupplierExists(db: DatabaseClient, supplierId: string) {
   const suppliers = await db.supplier.findMany({ where: { id: supplierId } });
   if (!suppliers.length) {
@@ -651,6 +701,8 @@ type ProductSnapshot = {
   minLot: number;
   leadTime: string;
   supplierId: string;
+  availableFrom?: string;
+  availableTo?: string;
   remarks?: string;
 };
 
@@ -678,6 +730,8 @@ const productDiffFields: Array<{ key: keyof ProductSnapshot; label: string }> = 
   { key: 'listPrice', label: '小売価格' },
   { key: 'minLot', label: '最小ロット' },
   { key: 'leadTime', label: '納期' },
+  { key: 'availableFrom', label: '商品期限（開始）' },
+  { key: 'availableTo', label: '商品期限（終了）' },
   { key: 'features', label: '特徴' },
   { key: 'description', label: '商品説明' },
   { key: 'remarks', label: '備考' },
@@ -698,6 +752,8 @@ function buildProductSnapshot(product: any, overrides: Partial<ProductSnapshot &
     minLot: Number(overrides.minLot ?? product.minLot),
     leadTime: overrides.leadTime ?? product.leadTime,
     supplierId: overrides.supplierId ?? product.supplierId,
+    availableFrom: normalizeOptionalDateString(overrides.availableFrom ?? product.availableFrom),
+    availableTo: normalizeOptionalDateString(overrides.availableTo ?? product.availableTo),
     remarks: normalizeOptionalString(overrides.remarks ?? product.remarks),
   };
 }
@@ -877,7 +933,9 @@ async function toProductPendingChangeDto(change: any, product: any, storage?: St
               ? '削除予定'
               : '並び替え予定',
         url: imageChange.objectKey
-          ? storage
+          ? imageChange.fileId
+            ? productFileContentUrl(imageChange.fileId)
+            : storage
             ? await storage.createDownloadUrl({ objectKey: imageChange.objectKey })
             : imageChange.objectKey
           : undefined,
@@ -893,7 +951,6 @@ async function toPendingProductImageDto(
   productId: string,
   file: { id: string; objectKey: string; originalName: string; mimeType: string; sizeBytes: number },
   sortOrder: number,
-  storage?: StorageService,
   warnings: string[] = [],
 ) {
   return {
@@ -901,7 +958,7 @@ async function toPendingProductImageDto(
     productId,
     fileId: file.id,
     sortOrder,
-    url: storage ? await storage.createDownloadUrl({ objectKey: file.objectKey }) : file.objectKey,
+    url: productFileContentUrl(file.id),
     originalName: file.originalName,
     mimeType: file.mimeType,
     sizeBytes: file.sizeBytes,
@@ -933,6 +990,17 @@ function normalizeOptionalString(value: unknown) {
   return text || undefined;
 }
 
+function normalizeOptionalDateString(value: unknown) {
+  if (!value) {
+    return undefined;
+  }
+  if (value instanceof Date) {
+    return toDateString(value);
+  }
+  const text = typeof value === 'string' ? value.trim() : '';
+  return text || undefined;
+}
+
 function formatDiffValue(field: keyof ProductSnapshot, value: unknown) {
   if (value === undefined || value === null || value === '') {
     return '未設定';
@@ -954,17 +1022,26 @@ function toDateString(value: Date | string) {
 }
 
 async function toProductImageDto(image: any, storage?: StorageService, warnings: string[] = []) {
+  const url = image.fileId
+    ? productFileContentUrl(image.fileId)
+    : storage
+      ? await storage.createDownloadUrl({ objectKey: image.file.objectKey })
+      : image.file.objectKey;
   return {
     id: image.id,
     productId: image.productId,
     fileId: image.fileId,
     sortOrder: image.sortOrder,
-    url: storage ? await storage.createDownloadUrl({ objectKey: image.file.objectKey }) : image.file.objectKey,
+    url,
     originalName: image.file.originalName,
     mimeType: image.file.mimeType,
     sizeBytes: image.file.sizeBytes,
     warnings,
   };
+}
+
+function productFileContentUrl(fileId: string) {
+  return `/api/files/${encodeURIComponent(fileId)}/content`;
 }
 
 async function normalizeProductImage(file: Express.Multer.File) {

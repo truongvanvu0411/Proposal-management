@@ -56,7 +56,7 @@ export function createApp(dependencies: AppDependencies = {}) {
   app.use('/api/projects', createProjectDocumentsRouter(db, storage, config));
   app.use('/api/notifications', createNotificationsRouter(db, config));
   app.use('/api/files', createFilesRouter(db, storage, config));
-  app.use('/api/exports', createExportsRouter(db, config));
+  app.use('/api/exports', createExportsRouter(db, config, storage));
 
   if (frontendDistDir && frontendIndexPath && fs.existsSync(frontendIndexPath)) {
     app.use(express.static(frontendDistDir));

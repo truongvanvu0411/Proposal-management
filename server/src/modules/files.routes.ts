@@ -30,6 +30,35 @@ export function createFilesRouter(
   config: AppConfig,
 ) {
   const router = Router();
+
+  router.get(
+    '/:id/content',
+    asyncHandler(async (req, res) => {
+      const file = (await db.file.findUnique({ where: { id: req.params.id } })) as
+        | {
+            id: string;
+            objectKey: string;
+            originalName: string;
+            mimeType: string;
+            sizeBytes?: number | null;
+            status: string;
+            deletedAt?: Date | null;
+          }
+        | null;
+
+      if (!file || file.deletedAt || file.status !== 'READY') {
+        throw new ApiError(404, 'File not found', 'FILE_NOT_FOUND');
+      }
+
+      const bytes = await storage.getObject({ objectKey: file.objectKey });
+      res.setHeader('Content-Type', file.mimeType);
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.originalName)}"`);
+      res.setHeader('Content-Length', String(bytes.length));
+      res.send(bytes);
+    }),
+  );
+
   router.use(requireAuth(config));
 
   router.post(

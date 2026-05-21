@@ -61,9 +61,13 @@ export function createProjectsRouter(db: DatabaseClient, config: AppConfig) {
         const projects = await db.project.findMany({
           where: {
             deletedAt: null,
-            orderRequests: {
+            status: ProjectStatus.ADOPTED,
+            products: {
               some: {
-                supplierId,
+                isAdopted: true,
+                product: {
+                  supplierId,
+                },
               },
             },
           },
@@ -92,6 +96,7 @@ export function createProjectsRouter(db: DatabaseClient, config: AppConfig) {
     asyncHandler(async (req, res) => {
       const body = req.body as z.infer<typeof projectSchema>;
       await assertAssignedSalesUser(db, body.assignedSalesUserId);
+      await assertProjectProductsCanBeProposed(db, body.products);
       const totals = calculateTotals(body.products);
       const project = await db.project.create({
         data: {
@@ -214,12 +219,20 @@ export function createProjectsRouter(db: DatabaseClient, config: AppConfig) {
       const body = req.body as Partial<z.infer<typeof projectSchema>>;
       const current = await db.project.findUnique({
         where: { id: req.params.id },
+        include: { products: true },
       });
       if (!current || current.deletedAt) {
         throw new ApiError(404, 'Project not found', 'PROJECT_NOT_FOUND');
       }
       if (body.assignedSalesUserId !== undefined) {
         await assertAssignedSalesUser(db, body.assignedSalesUserId);
+      }
+      if (body.products) {
+        await assertProjectProductsCanBeProposed(
+          db,
+          body.products,
+          new Set((current.products ?? []).map((product: any) => product.productId)),
+        );
       }
 
       const totals = body.products ? calculateTotals(body.products) : null;
@@ -260,6 +273,17 @@ export function createProjectsRouter(db: DatabaseClient, config: AppConfig) {
         include: createProjectInclude(),
       });
       if (body.products) {
+        await notifyProductAdoptionChanges(db, {
+          actorId: req.user?.id,
+          project: {
+            id: project.id,
+            title: project.title,
+            assignedSalesUserId: project.assignedSalesUserId,
+            status: project.status,
+          },
+          beforeProducts: current.products ?? [],
+          nextProducts: body.products,
+        });
         await ensureOrderRequestsForProject(db, project.id, body.products, req.user?.id);
       }
       const hydratedProject = await db.project.findUnique({
@@ -369,6 +393,65 @@ async function notifyOrderRequestCreated(
   );
 }
 
+async function notifyProductAdoptionChanges(
+  db: DatabaseClient,
+  input: {
+    actorId?: string;
+    project: { id: string; title: string; assignedSalesUserId?: string | null; status: ProjectStatus };
+    beforeProducts: Array<{ productId: string; isAdopted: boolean }>;
+    nextProducts: Array<z.infer<typeof projectProductSchema>>;
+  },
+) {
+  if (input.project.status !== ProjectStatus.ADOPTED) {
+    return;
+  }
+  const beforeMap = new Map(input.beforeProducts.map((product) => [product.productId, product.isAdopted]));
+  const newlyAdopted = input.nextProducts.filter((product) => product.isAdopted && !beforeMap.get(product.productId));
+  if (!newlyAdopted.length) {
+    return;
+  }
+
+  const productMasters = await db.product.findMany({
+    where: { id: { in: newlyAdopted.map((product) => product.productId) } },
+    select: { id: true, name: true, supplierId: true },
+  });
+  const productById = new Map<string, any>(productMasters.map((product: any) => [product.id, product]));
+  const users = await db.user.findMany({ where: { deletedAt: null } });
+
+  for (const projectProduct of newlyAdopted) {
+    const product = productById.get(projectProduct.productId);
+    if (!product) continue;
+    const recipientIds = new Set<string>();
+    for (const user of users) {
+      const isInternal =
+        user.role === UserRole.ADMIN ||
+        user.role === UserRole.PRODUCT_MANAGER ||
+        (input.project.assignedSalesUserId && user.id === input.project.assignedSalesUserId);
+      const isSupplier = user.role === UserRole.SUPPLIER && user.supplierId === product.supplierId;
+      if (isInternal || isSupplier) {
+        recipientIds.add(user.id);
+      }
+    }
+    if (input.actorId) {
+      recipientIds.delete(input.actorId);
+    }
+    await Promise.all(
+      Array.from(recipientIds).map((userId) =>
+        db.notification.create({
+          data: {
+            userId,
+            title: '採用商品が登録されました',
+            message: `${input.project.title} / ${product.name} が採用商品として登録されました。`,
+            type: 'PRODUCT_ADOPTED',
+            projectId: input.project.id,
+            productId: product.id,
+          },
+        }),
+      ),
+    );
+  }
+}
+
 async function resolveOrderNotificationRecipients(
   db: DatabaseClient,
   input: {
@@ -407,7 +490,7 @@ function createProjectInclude(supplierId?: string) {
       ? {
           where: {
             product: { supplierId },
-            allowOrder: true,
+            isAdopted: true,
           },
         }
       : true,
@@ -424,6 +507,34 @@ async function assertAssignedSalesUser(db: DatabaseClient, userId?: string) {
   const user = await db.user.findUnique({ where: { id: userId } });
   if (!user || user.deletedAt || user.role !== UserRole.SALES) {
     throw new ApiError(400, 'Assigned user must be an active sales user', 'INVALID_ASSIGNED_SALES_USER');
+  }
+}
+
+async function assertProjectProductsCanBeProposed(
+  db: DatabaseClient,
+  products: Array<z.infer<typeof projectProductSchema>>,
+  existingProductIds = new Set<string>(),
+) {
+  const productIds = products
+    .map((product) => product.productId)
+    .filter((productId) => !existingProductIds.has(productId));
+  if (!productIds.length) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const productMasters = await db.product.findMany({
+    where: { id: { in: productIds }, deletedAt: null },
+    select: { id: true, name: true, availableFrom: true, availableTo: true },
+  });
+  const productById = new Map<string, any>(productMasters.map((product: any) => [product.id, product]));
+  for (const productId of productIds) {
+    const product = productById.get(productId);
+    if (!product) {
+      throw new ApiError(400, 'Selected product is not available', 'PRODUCT_NOT_AVAILABLE_FOR_PROPOSAL');
+    }
+    const availableFrom = product.availableFrom ? new Date(product.availableFrom).toISOString().slice(0, 10) : '';
+    const availableTo = product.availableTo ? new Date(product.availableTo).toISOString().slice(0, 10) : '';
+    if ((availableFrom && availableFrom > today) || (availableTo && availableTo < today)) {
+      throw new ApiError(400, `${product.name} is outside the proposal availability period`, 'PRODUCT_EXPIRED_FOR_PROPOSAL');
+    }
   }
 }
 
@@ -466,6 +577,9 @@ async function ensureOrderRequestsForProject(
   const existingProductIds = new Set(existingOrders.map((order: { productId: string }) => order.productId));
   const orderableProducts = products.filter((product) => product.isAdopted && product.allowOrder);
   const project = await db.project.findUnique({ where: { id: projectId } });
+  if (!project || project.status !== ProjectStatus.ADOPTED) {
+    return;
+  }
 
   for (const projectProduct of orderableProducts) {
     if (existingProductIds.has(projectProduct.productId)) {

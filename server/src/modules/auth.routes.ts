@@ -22,6 +22,15 @@ const refreshSchema = z.object({
   refreshToken: z.string().optional(),
 });
 
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8).max(200),
+});
+
+const forgotPasswordSchema = z.object({
+  email: z.string().email(),
+});
+
 interface UserRecord extends AppUser {
   passwordHash: string;
   deletedAt?: Date | null;
@@ -103,6 +112,58 @@ export function createAuthRouter(db: DatabaseClient, config: AppConfig) {
   router.get('/me', requireAuth(config), (req, res) => {
     res.json({ user: req.user });
   });
+
+  router.post(
+    '/change-password',
+    requireAuth(config),
+    validateBody(changePasswordSchema),
+    asyncHandler(async (req, res) => {
+      const body = req.body as z.infer<typeof changePasswordSchema>;
+      const user = (await db.user.findUnique({
+        where: { id: req.user?.id },
+      })) as UserRecord | null;
+      if (!user || user.deletedAt) {
+        throw new ApiError(404, 'User not found', 'USER_NOT_FOUND');
+      }
+      const passwordMatches = await bcrypt.compare(body.currentPassword, user.passwordHash);
+      if (!passwordMatches) {
+        throw new ApiError(400, 'Current password is incorrect', 'CURRENT_PASSWORD_INCORRECT');
+      }
+      await db.user.update({
+        where: { id: user.id },
+        data: { passwordHash: await bcrypt.hash(body.newPassword, 12) },
+      });
+      await writeAuditLog(db, {
+        actorId: user.id,
+        action: 'AUTH_CHANGE_PASSWORD',
+        entityType: 'User',
+        entityId: user.id,
+      });
+      res.status(204).send();
+    }),
+  );
+
+  router.post(
+    '/forgot-password',
+    validateBody(forgotPasswordSchema),
+    asyncHandler(async (req, res) => {
+      const { email } = req.body as z.infer<typeof forgotPasswordSchema>;
+      const user = (await db.user.findUnique({ where: { email } })) as UserRecord | null;
+      const resetToken = Buffer.from(`${email}:${Date.now()}`).toString('base64url');
+      if (user && !user.deletedAt) {
+        await writeAuditLog(db, {
+          actorId: user.id,
+          action: 'AUTH_FORGOT_PASSWORD_REQUEST',
+          entityType: 'User',
+          entityId: user.id,
+        });
+      }
+      res.json({
+        message: 'パスワード再設定リンクを送信しました。（デモ環境）',
+        resetLink: `/login?resetToken=${resetToken}`,
+      });
+    }),
+  );
 
   return router;
 }

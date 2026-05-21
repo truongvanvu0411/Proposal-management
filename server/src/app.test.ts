@@ -61,6 +61,34 @@ describe('foundation API', () => {
       .expect(401);
   });
 
+  it('lets authenticated users change their own password and accepts forgot-password demo requests', async () => {
+    const app = createApp(await createTestDependenciesWithPassword('Correct123!'));
+    const auth = await getAuthHeader(app);
+
+    await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', auth)
+      .send({ currentPassword: 'Wrong123!', newPassword: 'NewPassword123!' })
+      .expect(400);
+
+    await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', auth)
+      .send({ currentPassword: 'Correct123!', newPassword: 'NewPassword123!' })
+      .expect(204);
+
+    await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'admin@example.com', password: 'NewPassword123!' })
+      .expect(200);
+
+    const forgot = await request(app)
+      .post('/api/auth/forgot-password')
+      .send({ email: 'admin@example.com' })
+      .expect(200);
+    expect(forgot.body.resetLink).toContain('/login?resetToken=');
+  });
+
   it('protects /api/auth/me', async () => {
     const app = createApp(await createTestDependenciesWithPassword('Correct123!'));
 
@@ -77,6 +105,18 @@ describe('foundation API', () => {
       .expect(200)
       .expect((response) => {
         expect(response.body.user.email).toBe('admin@example.com');
+      });
+  });
+
+  it('returns 401 instead of 500 for invalid refresh tokens', async () => {
+    const app = createApp(await createTestDependenciesWithPassword('Correct123!'));
+
+    await request(app)
+      .post('/api/auth/refresh')
+      .send({ refreshToken: 'invalid.refresh.token' })
+      .expect(401)
+      .expect((response) => {
+        expect(response.body.error.code).toBe('INVALID_TOKEN');
       });
   });
 
@@ -322,6 +362,24 @@ describe('foundation API', () => {
     expect(created.body.product.supplierId).toBe('supplier-1');
     expect(created.body.product.listPrice).toBe(120);
 
+    await request(app)
+      .post(`/api/products/${created.body.product.id}/images?initial=true`)
+      .set('Authorization', supplierAuth)
+      .attach('images', await createTestImage(), { filename: 'initial.png', contentType: 'image/png' })
+      .expect(201);
+
+    const initialList = await request(app).get('/api/products').set('Authorization', supplierAuth).expect(200);
+    const initialProduct = initialList.body.products.find((product: { id: string }) => product.id === created.body.product.id);
+    expect(initialProduct.status).toBe(ProductStatus.ACTIVE);
+    expect(initialProduct.images).toHaveLength(1);
+    expect(initialProduct.images[0]).toMatch(/^\/api\/files\/file-\d+\/content$/);
+    expect(initialProduct.pendingChange).toBeUndefined();
+
+    await request(app)
+      .get(initialProduct.images[0])
+      .expect(200)
+      .expect('Content-Type', /image\/jpeg/);
+
     const updated = await request(app)
       .patch(`/api/products/${created.body.product.id}`)
       .set('Authorization', supplierAuth)
@@ -371,8 +429,24 @@ describe('foundation API', () => {
 
     expect(dependencies.storage.objects.some((object) => object.contentType === 'image/jpeg')).toBe(true);
 
+    const invalidImageProduct = await request(app)
+      .post('/api/products')
+      .set('Authorization', supplierAuth)
+      .send({
+        name: 'Invalid Image Product',
+        description: 'Used for upload validation',
+        categoryName: 'Supplier Category',
+        janCode: 'supplier-invalid-image-jan',
+        productType: ProductType.WAREHOUSE,
+        cost: 120,
+        listPrice: 300,
+        minLot: 1,
+        leadTime: '5 days',
+      })
+      .expect(201);
+
     await request(app)
-      .post(`/api/products/${created.body.product.id}/images`)
+      .post(`/api/products/${invalidImageProduct.body.product.id}/images`)
       .set('Authorization', supplierAuth)
       .attach('images', Buffer.from('not an image'), { filename: 'bad.txt', contentType: 'text/plain' })
       .expect(400)
@@ -434,6 +508,43 @@ describe('foundation API', () => {
       totalProfit: 0,
       products: [],
     });
+
+    const expiredProduct = await request(app)
+      .post('/api/products')
+      .set('Authorization', auth)
+      .send({
+        name: 'Expired Product',
+        description: 'Cannot be proposed after its availability window.',
+        categoryName: 'Gadget',
+        janCode: '9990001112223',
+        productType: ProductType.WAREHOUSE,
+        cost: 120,
+        listPrice: 240,
+        minLot: 1,
+        leadTime: '3 days',
+        supplierId: 'supplier-1',
+        availableTo: '2026-01-01',
+      })
+      .expect(201);
+
+    await request(app)
+      .post('/api/projects')
+      .set('Authorization', auth)
+      .send({
+        title: 'Expired Product Proposal',
+        clientId: 'client-1',
+        status: ProjectStatus.PROPOSED,
+        products: [
+          {
+            productId: expiredProduct.body.product.id,
+            proposalComment: 'Expired',
+            cost: 120,
+            sellingPrice: 260,
+            quantity: 1,
+          },
+        ],
+      })
+      .expect(400);
 
     const updated = await request(app)
       .patch(`/api/projects/${created.body.project.id}`)
@@ -700,9 +811,31 @@ describe('foundation API', () => {
       .post('/api/projects')
       .set('Authorization', productManagerAuth)
       .send({
+        title: 'Adopted Supplier Project',
+        clientId: 'client-1',
+        status: 'ADOPTED',
+        products: [
+          {
+            productId: 'product-seeded',
+            proposalComment: 'Adopted but not ordered yet',
+            cost: 100,
+            sellingPrice: 250,
+            quantity: 4,
+            isAdopted: true,
+            allowOrder: false,
+            companyProductCode: 'CMP-ADOPTED-ONLY',
+          },
+        ],
+      })
+      .expect(201);
+
+    await request(app)
+      .post('/api/projects')
+      .set('Authorization', productManagerAuth)
+      .send({
         title: 'Mixed Supplier Proposal',
         clientId: 'client-1',
-        status: 'PROPOSED',
+        status: 'ADOPTED',
         products: [
           {
             productId: 'product-seeded',
@@ -734,6 +867,17 @@ describe('foundation API', () => {
       .expect(200);
 
     expect(supplierProjects.body.projects.map((project: { title: string }) => project.title)).not.toContain('Proposal Only Supplier Project');
+    const adoptedProject = supplierProjects.body.projects.find((project: { title: string }) => project.title === 'Adopted Supplier Project');
+    expect(adoptedProject).toBeTruthy();
+    expect(adoptedProject.products).toHaveLength(1);
+    expect(adoptedProject.products[0]).toMatchObject({
+      productId: 'product-seeded',
+      isAdopted: true,
+      companyProductCode: 'CMP-ADOPTED-ONLY',
+      cost: 0,
+      sellingPrice: 0,
+    });
+    expect(adoptedProject.orderRequests).toHaveLength(0);
     const mixedProject = supplierProjects.body.projects.find((project: { title: string }) => project.title === 'Mixed Supplier Proposal');
     expect(mixedProject).toBeTruthy();
     expect(mixedProject.products).toHaveLength(1);
@@ -795,6 +939,12 @@ describe('foundation API', () => {
       })
       .expect(201);
 
+    await request(app)
+      .post('/api/products/product-seeded/images?initial=true')
+      .set('Authorization', auth)
+      .attach('images', await createTestImage(), { filename: 'export-image.png', contentType: 'image/png' })
+      .expect(201);
+
     const projects = await request(app)
       .get('/api/exports/projects.csv')
       .set('Authorization', auth)
@@ -816,6 +966,20 @@ describe('foundation API', () => {
     expect(productMaster.text).toContain('Supplier One');
     expect(productMaster.text).toContain(',100,250,');
 
+    const productMasterZip = await request(app)
+      .get('/api/exports/product-master.zip')
+      .set('Authorization', auth)
+      .buffer()
+      .parse((res, callback) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+        res.on('end', () => callback(null, Buffer.concat(chunks)));
+      })
+      .expect(200);
+    const productExportZip = new PizZip(productMasterZip.body);
+    expect(productExportZip.file('product-master.csv')?.asText()).toContain('product_id,name,description');
+    expect(Object.keys(productExportZip.files).some((file) => file.startsWith('images/'))).toBe(true);
+
     const webListing = await request(app)
       .get('/api/exports/web-listing.csv')
       .set('Authorization', auth)
@@ -825,6 +989,28 @@ describe('foundation API', () => {
     expect(webListing.text).not.toContain('cost');
     expect(webListing.text).not.toContain('supplier_name');
     expect(webListing.text).not.toContain('total_profit');
+
+    const adoptedProducts = await request(app)
+      .get('/api/exports/adopted-products.csv?supplierId=supplier-1&clientId=client-1')
+      .set('Authorization', auth)
+      .expect(200);
+    expect(adoptedProducts.text).toContain('company_product_code,product_id,product_name');
+    expect(adoptedProducts.text).toContain('sales_amount');
+    expect(adoptedProducts.text).toContain('CMP-001');
+
+    const adoptedProductsZip = await request(app)
+      .get('/api/exports/adopted-products.zip')
+      .set('Authorization', auth)
+      .buffer()
+      .parse((res, callback) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+        res.on('end', () => callback(null, Buffer.concat(chunks)));
+      })
+      .expect(200);
+    const exportZip = new PizZip(adoptedProductsZip.body);
+    expect(exportZip.file('adopted-products.csv')?.asText()).toContain('CMP-001');
+    expect(Object.keys(exportZip.files).some((file) => file.startsWith('images/') && file.endsWith('.jpg'))).toBe(true);
 
     const internalMaster = await request(app)
       .get('/api/exports/internal-master.csv')
@@ -852,12 +1038,27 @@ describe('foundation API', () => {
     const app = createApp(dependencies);
     const auth = await getAuthHeader(app);
     const supplierAuth = await getSupplierAuthHeader(app);
+    const salesAuth = await getSalesAuthHeader(app);
     const storage = dependencies.storage as ReturnType<typeof createFakeStorage>;
 
     await request(app).post('/api/projects/project-1/documents/proposal-pptx').expect(401);
     await request(app)
       .post('/api/projects/project-1/documents/proposal-pptx')
       .set('Authorization', supplierAuth)
+      .expect(403);
+    const unassigned = await request(app)
+      .post('/api/projects')
+      .set('Authorization', auth)
+      .send({
+        title: 'Unassigned Document Project',
+        clientId: 'client-1',
+        status: ProjectStatus.DRAFT,
+        products: [],
+      })
+      .expect(201);
+    await request(app)
+      .post(`/api/projects/${unassigned.body.project.id}/documents/proposal-pptx`)
+      .set('Authorization', salesAuth)
       .expect(403);
 
     await request(app)
@@ -877,6 +1078,7 @@ describe('foundation API', () => {
       .send({
         title: 'Document Project',
         clientId: 'client-1',
+        assignedSalesUserId: 'user-sales',
         status: ProjectStatus.PROPOSED,
         products: [
           {
@@ -903,7 +1105,7 @@ describe('foundation API', () => {
     expect(proposal.body.document).toMatchObject({
       purpose: 'PROJECT_PROPOSAL_PPTX',
       mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      downloadUrl: 'https://storage.example.test/download',
+      downloadUrl: expect.stringMatching(/^\/api\/files\/.+\/content$/),
     });
     const proposalObject = storage.objects.find((object) => object.objectKey.includes('/project_proposal_pptx/'));
     expect(proposalObject?.body.length).toBeGreaterThan(1000);
@@ -946,6 +1148,16 @@ describe('foundation API', () => {
     expect(getXlsxCellValue(plSheetXml, 'I9')).toBe('450');
     expect(getXlsxCellValue(plSheetXml, 'N4')).toBe('750');
     expect(getXlsxCellValue(plSheetXml, 'N6')).toBe('450');
+    expect(getXlsxCellFormula(plSheetXml, 'F9')).toBe('D9*E9');
+    expect(getXlsxCellFormula(plSheetXml, 'H9')).toBe('D9*G9');
+    expect(getXlsxCellFormula(plSheetXml, 'I9')).toBe('F9-H9');
+    expect(getXlsxCellFormula(plSheetXml, 'J9')).toBe('IF(F9>0,I9/F9,0)');
+    expect(getXlsxCellFormula(plSheetXml, 'F21')).toBe('SUM(F9:F20)');
+    expect(getXlsxCellFormula(plSheetXml, 'H21')).toBe('SUM(H9:H20)');
+    expect(getXlsxCellFormula(plSheetXml, 'I21')).toBe('F21-H21');
+    expect(getXlsxCellFormula(plSheetXml, 'N4')).toBe('F21');
+    expect(getXlsxCellFormula(plSheetXml, 'N6')).toBe('I21');
+    expect(plZip.file('xl/workbook.xml')?.asText()).toContain('fullCalcOnLoad="1"');
 
     const list = await request(app)
       .get(`/api/projects/${created.body.project.id}/documents`)
@@ -955,6 +1167,15 @@ describe('foundation API', () => {
       'PROJECT_PL_XLSX',
       'PROJECT_PROPOSAL_PPTX',
     ]);
+    await request(app)
+      .get(`/api/projects/${created.body.project.id}/documents`)
+      .set('Authorization', salesAuth)
+      .expect(200);
+    await request(app)
+      .post(`/api/projects/${created.body.project.id}/documents/proposal-pptx`)
+      .set('Authorization', salesAuth)
+      .send({})
+      .expect(200);
 
     const auditLogs = dependencies.db.auditLog._records as Array<{ action: string; metadata?: { purpose?: string } }>;
     expect(auditLogs.some((log) => log.action === 'DOCUMENT_GENERATE' && log.metadata?.purpose === 'PROJECT_PL_XLSX')).toBe(true);
@@ -1641,12 +1862,16 @@ function createFakeDb(passwordHash = 'unused'): DatabaseClient {
           .filter((project) => (
             !project.deletedAt &&
             (!where.assignedSalesUserId || project.assignedSalesUserId === where.assignedSalesUserId) &&
+            (!where.status || project.status === where.status) &&
             (!where.orderRequests?.some?.supplierId ||
               (project.orderRequests ?? []).some((order: any) => order.supplierId === where.orderRequests.some.supplierId)) &&
             (!where.products?.some?.product?.supplierId ||
               project.products.some((projectProduct: any) => {
                 const product = products.find((item) => item.id === projectProduct.productId);
-                return product?.supplierId === where.products.some.product.supplierId;
+                const matchesSupplier = product?.supplierId === where.products.some.product.supplierId;
+                const matchesAdopted = where.products.some.isAdopted === undefined ||
+                  projectProduct.isAdopted === where.products.some.isAdopted;
+                return matchesSupplier && matchesAdopted;
               }))
           ))
           .map((project) => ({
@@ -1658,7 +1883,9 @@ function createFakeDb(passwordHash = 'unused'): DatabaseClient {
                   const matchesSupplier = product?.supplierId === args.include.products.where.product.supplierId;
                   const matchesAllowOrder = args.include.products.where.allowOrder === undefined ||
                     projectProduct.allowOrder === args.include.products.where.allowOrder;
-                  return matchesSupplier && matchesAllowOrder;
+                  const matchesAdopted = args.include.products.where.isAdopted === undefined ||
+                    projectProduct.isAdopted === args.include.products.where.isAdopted;
+                  return matchesSupplier && matchesAllowOrder && matchesAdopted;
                 })
               : project.products,
             orderRequests: args.include?.orderRequests?.where?.supplierId
@@ -1940,6 +2167,16 @@ function getSlideXml(zip: PizZip) {
 function getXlsxCellValue(sheetXml: string, cell: string) {
   const match = sheetXml.match(new RegExp(`<x:c\\b[^>]*\\br="${cell}"[^>]*>([\\s\\S]*?)</x:c>`));
   return match?.[1].match(/<x:v>([\s\S]*?)<\/x:v>/)?.[1] ?? '';
+}
+
+function getXlsxCellFormula(sheetXml: string, cell: string) {
+  const match = sheetXml.match(new RegExp(`<x:c\\b[^>]*\\br="${cell}"[^>]*>([\\s\\S]*?)</x:c>`));
+  const formula = match?.[1].match(/<x:f>([\s\S]*?)<\/x:f>/)?.[1] ?? '';
+  return formula
+    .replace(/&gt;/g, '>')
+    .replace(/&lt;/g, '<')
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&');
 }
 
 function extractPictureExtents(slideXml: string) {

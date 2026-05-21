@@ -168,6 +168,8 @@ model Product {
   supplier    Supplier            @relation(fields: [supplierId], references: [id])
   status      ProductStatus       @default(DRAFT)
   imageUrl    String?
+  availableFrom DateTime?
+  availableTo   DateTime?
   version     Int                 @default(1)
   remarks     String?
   versions    ProductVersion[]
@@ -185,6 +187,8 @@ model Product {
   @@index([status])
   @@index([supplierId])
   @@index([categoryId])
+  @@index([availableFrom])
+  @@index([availableTo])
   @@index([createdAt])
   @@index([deletedAt])
 }

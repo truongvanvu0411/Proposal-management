@@ -72,6 +72,16 @@ export const api = {
 
   me: () => request<{ user: User }>('/auth/me'),
 
+  changePassword: (input: { currentPassword: string; newPassword: string }) =>
+    request<void>('/auth/change-password', { method: 'POST', body: input }),
+
+  requestPasswordReset: (input: { email: string }) =>
+    request<{ message: string; resetLink: string }>('/auth/forgot-password', {
+      method: 'POST',
+      body: input,
+      skipAuth: true,
+    }),
+
   listUsers: (query: { role?: string; supplierId?: string; status?: string } = {}) => {
     const params = new URLSearchParams();
     if (query.role) params.set('role', query.role);
@@ -130,9 +140,9 @@ export const api = {
       body: toProductPayload(product),
     }),
   deleteProduct: (id: string) => request<void>(`/products/${id}`, { method: 'DELETE' }),
-  uploadProductImages: (productId: string, files: File[]) =>
+  uploadProductImages: (productId: string, files: File[], options: { initial?: boolean } = {}) =>
     uploadFiles<{ images: Product['imageAssets']; rejected: Array<{ fileName: string; code: string; message: string }> }>(
-      `/products/${productId}/images`,
+      `/products/${productId}/images${options.initial ? '?initial=true' : ''}`,
       'images',
       files,
     ),
@@ -185,7 +195,29 @@ export const api = {
       },
     ),
 
-  downloadExport: (dataset: string) => downloadFile(`/exports/${dataset}.csv`),
+  downloadExport: (
+    dataset: string,
+    filters: {
+      supplierId?: string;
+      clientId?: string;
+      status?: string;
+      productStatus?: string;
+      fromDate?: string;
+      toDate?: string;
+      includeImages?: boolean;
+    } = {},
+  ) => {
+    const params = new URLSearchParams();
+    if (filters.supplierId) params.set('supplierId', filters.supplierId);
+    if (filters.clientId) params.set('clientId', filters.clientId);
+    if (filters.status) params.set('status', filters.status);
+    if (filters.productStatus) params.set('productStatus', filters.productStatus);
+    if (filters.fromDate) params.set('fromDate', filters.fromDate);
+    if (filters.toDate) params.set('toDate', filters.toDate);
+    const extension = filters.includeImages ? 'zip' : 'csv';
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    return downloadFile(`/exports/${dataset}.${extension}${suffix}`);
+  },
 };
 
 function toProductPayload(product: Product) {
@@ -203,6 +235,8 @@ function toProductPayload(product: Product) {
     leadTime: product.leadTime,
     supplierId: product.supplierId,
     status: product.status,
+    availableFrom: product.availableFrom ?? '',
+    availableTo: product.availableTo ?? '',
     remarks: product.remarks,
   };
 }
@@ -287,7 +321,7 @@ async function downloadFile(path: string) {
   }
 
   const disposition = response.headers.get('Content-Disposition');
-  const dataset = path.split('/').pop()?.replace(/\.csv$/, '') ?? 'export';
+  const dataset = path.split('/').pop()?.split('?')[0]?.replace(/\.(csv|zip)$/, '') ?? 'export';
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const filename = getFilenameFromDisposition(disposition) ?? `${dataset}-${today}.csv`;
   const blob = await response.blob();
